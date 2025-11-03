@@ -4,7 +4,7 @@ CurrentModule = ARCEMEAnalysis
 
 # ARCEMEAnalysis
 
-Documentation for [ARCEMEAnalysis](https://github.com/meggart/ARCEMEAnalysis.jl).
+Documentation for [ARCEMEAnalysis](https://github.com/ARCEME/ARCEMEAnalysis.jl).
 
 ```@index
 ```

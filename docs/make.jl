@@ -8,7 +8,7 @@ makedocs(;
     authors="Melanie Weynants <mweynants@bgc-jena.mpg.de>, Fabian Gans <fgans@bgc-jena.mpg.de>",
     sitename="ARCEMEAnalysis.jl",
     format=Documenter.HTML(;
-        canonical="https://meggart.github.io/ARCEMEAnalysis.jl",
+        canonical="https://ARCEME.github.io/ARCEMEAnalysis.jl",
         edit_link="main",
         assets=String[],
     ),
@@ -18,6 +18,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/meggart/ARCEMEAnalysis.jl",
+    repo="github.com/ARCEME/ARCEMEAnalysis.jl",
     devbranch="main",
 )
