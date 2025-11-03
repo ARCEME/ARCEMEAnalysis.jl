@@ -2,6 +2,7 @@ module ARCEMEAnalysis
 using Zarr: S3Store, Zarr
 using Minio: MinioConfig
 using YAXArrays: open_dataset
+using Colors: RGB
 using Dates: DateTime, Year
 
 export arceme_cubenames, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate, arceme_coordinates, arceme_ndvi, arceme_rgb
