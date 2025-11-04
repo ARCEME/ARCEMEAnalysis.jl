@@ -3,16 +3,33 @@ using Zarr: S3Store, Zarr
 using Minio: MinioConfig
 using YAXArrays: open_dataset
 using Colors: RGB
-using Dates: DateTime, Year
+using Dates: DateTime, Year, Date
+import CSV
+using DataStructures: SortedDict
+const arceme_classes = SortedDict(
+  10  => "Tree cover",
+  20  => "Shrubland",
+  30  => "Grassland",
+  40  => "Cropland",
+  50  => "Built-up",
+  60  => "Bare /sparse vegetation",
+  70  => "Snow and Ice",
+  80  => "Permanent water bodies",
+  90  => "Herbaceous wetland",
+  95  => "Mangroves",
+  100 => "Moss and lichen",
+)
 
-export arceme_cubenames, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate, arceme_coordinates, arceme_ndvi, arceme_rgb
+export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
+    arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
+    arceme_classes
 
 """
-    arceme_cubenames(;batch="SECONDBATCH")
+    _arceme_cubenames(;batch="SECONDBATCH")
 
 List all available data cube names in the specified batch stored in the ARCEME S3 bucket.
 """
-function arceme_cubenames(; batch="SECONDBATCH")
+function _arceme_cubenames(; batch="SECONDBATCH")
     store = S3Store("ARCEME-DATACUBES/", MinioConfig("https://s3.waw3-2.cloudferro.com/swift/v1"))
 
     resp = Zarr.cloud_list_objects(store, batch)
@@ -20,6 +37,70 @@ function arceme_cubenames(; batch="SECONDBATCH")
         split(p, "/")[2]
     end
     filter!(startswith("DC"), cubenames)
+end
+
+
+
+"""
+    struct Event
+
+Define a structure to hold information about an ARCEME event.
+"""
+struct Event
+    dhp_label::Int
+    dlabel::Int
+    longitude::Float64
+    latitude::Float64
+    tp::Float64
+    eventdate::DateTime
+    source::Symbol
+    unveg::Float64
+    sparse::Float64
+    teow::Int
+    biome::String
+end
+
+"""
+    arceme_eventlist()
+
+Get a list of ARCEME events from the local CSV file.
+"""
+function arceme_eventlist()
+    map(CSV.File(joinpath(@__DIR__, "..", "data", "dhp_global_subselection.csv"))) do row
+        Event(
+            row.dhp_label,
+            row.dlabel,
+            row.longitude,
+            row.latitude,
+            row.tp_int,
+            DateTime(row.date),
+            Symbol(row.source),
+            row.unveg,
+            row.sparse,
+            row.teow,
+            row.biome,
+
+        )
+    end
+end
+
+arceme_cubename(event::Event) = 
+if event.source == :d
+    "DC__$(event.dlabel)_d__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
+else
+    "DC__$(event.dhp_label)_dhp__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
+end
+
+"""
+    arceme_eventpairs()
+
+Get pairs of ARCEME events from the event list.
+"""
+arceme_eventpairs() =
+    Iterators.partition(sort(arceme_eventlist(),by=i->(i.dhp_label,i.source)),2) |> collect
+
+function arceme_open(event::Event)
+    arceme_open(arceme_cubename(event))
 end
 
 """ 
@@ -37,6 +118,8 @@ arceme_open(cubename; batch="SECONDBATCH") =
 Get the start time of the ARCEME data cube dataset `ds`
 """
 arceme_starttime(ds) = parse(DateTime, ds.properties["time_coverage_start"])
+arceme_starttime(ev::Event) = ev.eventdate - Year(1)
+
 
 """
     arceme_endtime(ds)
@@ -44,6 +127,7 @@ arceme_starttime(ds) = parse(DateTime, ds.properties["time_coverage_start"])
 Get the end time of the ARCEME data cube dataset `ds`
 """
 arceme_endtime(ds) = parse(DateTime, ds.properties["time_coverage_end"])
+arceme_endtime(ev::Event) = ev.eventdate + Year(1)
 
 """
     arceme_eventdate(ds)
@@ -51,7 +135,7 @@ arceme_endtime(ds) = parse(DateTime, ds.properties["time_coverage_end"])
 Get the time of when the event in an ARCEME data cube dataset `ds` happened.
 """
 arceme_eventdate(ds) = arceme_starttime(ds) + Year(1)
-
+arceme_eventdate(ev::Event) = ev.eventdate
 
 """
     arceme_coordinates(ds)
