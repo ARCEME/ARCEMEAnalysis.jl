@@ -1,12 +1,14 @@
 module ARCEMEAnalysis
 using Zarr: S3Store, Zarr
 using Minio: MinioConfig
-using YAXArrays: open_dataset
+using YAXArrays: open_dataset, ⊘, xmap, XOutput
+import DimensionalData as DD
 using Colors: RGB
 using Dates: DateTime, Year, Date
 import CSV
-using DataStructures: SortedDict
+using DataStructures: SortedDict, counter
 const arceme_classes = SortedDict(
+  0   => "No data",
   10  => "Tree cover",
   20  => "Shrubland",
   30  => "Grassland",
@@ -22,7 +24,7 @@ const arceme_classes = SortedDict(
 
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
-    arceme_classes
+    arceme_classes, arceme_landcover
 
 """
     _arceme_cubenames(;batch="SECONDBATCH")
@@ -38,7 +40,6 @@ function _arceme_cubenames(; batch="SECONDBATCH")
     end
     filter!(startswith("DC"), cubenames)
 end
-
 
 
 """
@@ -102,6 +103,21 @@ arceme_eventpairs() =
 function arceme_open(event::Event)
     arceme_open(arceme_cubename(event))
 end
+
+"""
+     arceme_landcover(ds)
+
+Get the land cover statistics for the ARCEME data cube dataset `ds`.
+"""
+function arceme_landcover(ds)
+    cdr = counter(ds.ESA_LC);
+    map(collect(arceme_classes)) do (k,v)
+        count=get(cdr, k, 0)
+        (key=k, class=v, count=count, fraction=count/1000000)
+    end
+end
+arceme_landcover(ev::Event) = arceme_landcover(arceme_open(ev))
+
 
 """ 
     arceme_open(cubename; batch="SECONDBATCH")
@@ -171,8 +187,8 @@ Compute the RGB composite for the ARCEME data cube dataset `ds`.
 arceme_rgb(ds) =
     broadcast(ds.B02, ds.B03, ds.B04) do b, g, r
         m = typemax(Int16)
-        RGB(r / m * 4, g / m * 4, b / m * 4)
+        RGB(r / m * 8, g / m * 8, b / m * 8)
 end
 
-
+include("spatialdebias.jl")
 end #module
