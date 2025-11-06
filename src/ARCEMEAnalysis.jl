@@ -1,12 +1,14 @@
 module ARCEMEAnalysis
 using Zarr: S3Store, Zarr
 using Minio: MinioConfig
-using YAXArrays: open_dataset, ⊘, xmap, XOutput
+using YAXArrays: open_dataset, ⊘, xmap, XOutput, YAXArray
+import YAXArrays
 import DimensionalData as DD
 using Colors: RGB
 using Dates: DateTime, Year, Date
 import CSV
 using DataStructures: SortedDict, counter
+import Proj
 const arceme_classes = SortedDict(
   0   => "No data",
   10  => "Tree cover",
