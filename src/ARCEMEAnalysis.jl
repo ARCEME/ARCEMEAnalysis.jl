@@ -126,7 +126,7 @@ arceme_landcover(ev::Event) = arceme_landcover(arceme_open(ev))
 Open the specified ARCEME data cube from the S3 bucket.
 """
 arceme_open(cubename; batch="SECONDBATCH") =
-    open_dataset("https://s3.waw3-2.cloudferro.com/swift/v1/ARCEME-DATACUBES/$batch/$cubename")
+    open_dataset("https://s3.waw3-2.cloudferro.com/swift/v1/ARCEME-DATACUBES/$batch/$cubename", prefer_datetime=true)
 
 
 """
@@ -173,8 +173,8 @@ end
 Compute the NDVI (Normalized Difference Vegetation Index) for the ARCEME data cube dataset `ds`.
 """
 arceme_ndvi(ds) =
-    broadcast(ds.B04, ds.B08, ds.cloud_mask) do b4, b8, cl
-        cl > 0 && return NaN
+    broadcast(ds.B04, ds.B08, ds.cloud_mask, ds.SCL) do b4, b8, cl, scl
+        (cl > 0 || (scl in (1, 3, 8, 9, 10, 11))) && return NaN
         fb4 = b4 / typemax(Int16)
         fb8 = b8 / typemax(Int16)
         (fb8 - fb4) / (fb8 + fb4)
@@ -188,7 +188,7 @@ Compute the RGB composite for the ARCEME data cube dataset `ds`.
 arceme_rgb(ds) =
     broadcast(ds.B02, ds.B03, ds.B04) do b, g, r
         m = typemax(Int16)
-        RGB(r / m * 8, g / m * 8, b / m * 8)
+        RGB(r / m * 4, g / m * 4, b / m * 4)
 end
 
 include("spatialdebias.jl")
