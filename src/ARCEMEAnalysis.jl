@@ -11,6 +11,7 @@ using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
 
 import Proj
+import Proj
 const arceme_classes = SortedDict(
   0   => "No data",
   10  => "Tree cover",
