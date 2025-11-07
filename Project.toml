@@ -1,6 +1,6 @@
 name = "ARCEMEAnalysis"
 uuid = "563f603e-cf7b-4a8e-a33e-18ac0a6a317f"
-version = "0.1.0-DEV"
+version = "0.1.1-DEV"
 authors = ["Melanie Weynants <mweynants@bgc-jena.mpg.de>", "Fabian Gans <fgans@bgc-jena.mpg.de>"]
 
 [deps]

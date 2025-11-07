@@ -26,7 +26,7 @@ function bare_matrix(c,timname)
 end
 
 """
-    arceme_bias_corrected_fp(inputcube,cloudcube,lccube)
+    arceme_bias_corrected_fp(inputcube,cloudcube,lccube;cl::SortedDict=arceme_classes)
 
 Computes a cloud-biased corrected footprint aggregated by land cover class for the 
 provided inputcube, cloud mask and land cover cube. 
@@ -61,7 +61,7 @@ function arceme_bias_corrected_fp(inputcube, dataset)
     win_data = YAXArrays.windows(inputcube_filtered,lccube,expected_groups=0:100)
     fp = mean.(win_data)[:,1,1,:].data
 
-    classkeys = collect(keys(arceme_classes))[2:end]
+    classkeys = collect(keys(cl))[2:end]
     abundance = counter(lccube)
     sort!(classkeys,by=i->(abundance[i],i),rev=true)
     newdata = fp[classkeys,:] .+ fp_clearsky_expected[classkeys,:] .- fp_clouded_expected[classkeys,:]
