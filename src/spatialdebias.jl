@@ -5,7 +5,7 @@ function sincosparams(c,timname = :time_sentinel_2_l2a)
     xmap(
         fit_sincos, 
         c ⊘ timname, 
-        output=XOutput(DD.Dim{:param}(["p1","p2","p3"])),
+        output=XOutput(DD.Dim{:param}(["p1","p2","p3"]),outtype=Float32),
         inplace=false,
         function_args=(fitmat,)
     )
@@ -55,17 +55,24 @@ function arceme_bias_corrected_fp(inputcube, dataset)
     win_clouded = YAXArrays.windows(clouded_expected,lccube,expected_groups=0:100)
     fp_clouded_expected = mean.(win_clouded)[:,1,1,1,:].data
 
-    win_data = YAXArrays.windows(inputcube,lccube,expected_groups=0:100)
+    inputcube_filtered = xmap(inputcube, cloudcube,sclcube,inplace=false,output=XOutput(outtype=Float32)) do x,cl,scl
+        (cl > 0 || scl in (1, 3, 8, 9, 10, 11)) ? NaN : x
+    end
+    win_data = YAXArrays.windows(inputcube_filtered,lccube,expected_groups=0:100)
     fp = mean.(win_data)[:,1,1,:].data
 
     classkeys = collect(keys(arceme_classes))[2:end]
+    abundance = counter(lccube)
+    sort!(classkeys,by=i->(abundance[i],i),rev=true)
     newdata = fp[classkeys,:] .+ fp_clearsky_expected[classkeys,:] .- fp_clouded_expected[classkeys,:]
-    classax = DD.Dim{:lc}(collect(values(arceme_classes))[2:end])
+    classax = DD.Dim{:lc}([arceme_classes[i] for i in classkeys])
+
     Dataset(
         fp = YAXArray((classax,inputcube.time_sentinel_2_l2a),newdata),
         fp_uncorrected=YAXArray((classax, inputcube.time_sentinel_2_l2a), fp[classkeys, :]),
         clearsky_expected = YAXArray((classax,inputcube.time_sentinel_2_l2a),fp_clearsky_expected[classkeys,:]),
-        clouded_expected = YAXArray((classax,inputcube.time_sentinel_2_l2a),fp_clouded_expected[classkeys,:])
+        clouded_expected = YAXArray((classax,inputcube.time_sentinel_2_l2a),fp_clouded_expected[classkeys,:]),
+        lc_fractions = YAXArray((classax,),[abundance[i] for i in classkeys])
     )
     
 end
