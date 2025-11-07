@@ -58,5 +58,10 @@ function arceme_bias_corrected_fp(inputcube,cloudcube,lccube)
     classkeys = collect(keys(arceme_classes))[2:end]
     newdata = fp[classkeys,:] .+ fp_clearsky_expected[classkeys,:] .- fp_clouded_expected[classkeys,:]
     classax = DD.Dim{:lc}(collect(values(arceme_classes))[2:end])
-    YAXArray((classax,inputcube.time_sentinel_2_l2a),newdata)
+    Dataset(
+        fp = YAXArray((classax,inputcube.time_sentinel_2_l2a),newdata),
+        clearsky_expected = YAXArray((classax,inputcube.time_sentinel_2_l2a),fp_clearsky_expected[classkeys,:]),
+        clouded_expected = YAXArray((classax,inputcube.time_sentinel_2_l2a),fp_clouded_expected[classkeys,:])
+    )
+    
 end
