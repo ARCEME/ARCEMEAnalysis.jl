@@ -176,7 +176,7 @@ Compute the NDVI (Normalized Difference Vegetation Index) for the ARCEME data cu
 """
 arceme_ndvi(ds) =
     broadcast(ds.B04, ds.B08, ds.cloud_mask, ds.SCL) do b4, b8, cl, scl
-        (cl > 0 || (scl in (1, 3, 8, 9, 10, 11))) && return NaN
+        (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return NaN
         fb4 = b4 / typemax(Int16)
         fb8 = b8 / typemax(Int16)
         (fb8 - fb4) / (fb8 + fb4)
@@ -207,13 +207,13 @@ function arceme_optical_band_footprints(ds_d, ds_dhp)
     eventdate_dhp = arceme_eventdate(ds_dhp)
 
     fp_d = @showprogress desc = "Drought Footprint.." map(optical_bands) do band
-        arceme_bias_corrected_fp(ds_d[band], ds_d)
+        arceme_bias_corrected_fp(band, ds_d)
     end
     footprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
 
 
     fp_dhp = @showprogress desc = "DHP Footprint......" map(optical_bands) do band
-        arceme_bias_corrected_fp(ds_dhp[band], ds_dhp)
+        arceme_bias_corrected_fp(band, ds_dhp)
     end
     footprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
     footprints_d = time_aggregate_footprint(footprint_sparse_d, eventdate_d, banddim, :time_sentinel_2_l2a)
@@ -236,13 +236,13 @@ function arceme_radar_footprints(ds_d, ds_dhp)
     eventdate_dhp = arceme_eventdate(ds_dhp)
 
     fp_d = map(radar_bands) do band
-        arceme_uncorrected_fp(ds_d[band], ds_d)
+        arceme_uncorrected_fp(band, ds_d)
     end
     footprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
 
 
     fp_dhp = map(radar_bands) do band
-        arceme_uncorrected_fp(ds_dhp[band], ds_dhp)
+        arceme_uncorrected_fp(band, ds_dhp)
     end
     footprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
 
