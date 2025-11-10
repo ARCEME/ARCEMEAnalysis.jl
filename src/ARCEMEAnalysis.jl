@@ -27,7 +27,7 @@ const arceme_classes = SortedDict(
 
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
-    arceme_classes, arceme_landcover, arceme_optical_band_footprints
+    arceme_classes, arceme_landcover, arceme_optical_band_footprints, arceme_radar_footprints
 
 """
     _arceme_cubenames(;batch="SECONDBATCH")
@@ -193,6 +193,12 @@ arceme_rgb(ds) =
         RGB(r / m * 4, g / m * 4, b / m * 4)
 end
 
+"""
+    arceme_optical_band_footprints(ds_d, ds_dhp)
+
+Computes footprints for all optical bands in the ARCEME data cube datasets `ds_d` and `ds_dhp`. 
+Also aggregates the footprints over time in 2-monthly windows for the whol 2 years around the event date.
+"""
 function arceme_optical_band_footprints(ds_d, ds_dhp)
 
     optical_bands = [:B01, :B02, :B03, :B04, :B05, :B06, :B07, :B08, :B8A, :B09, :B11, :B12]
@@ -200,37 +206,100 @@ function arceme_optical_band_footprints(ds_d, ds_dhp)
     eventdate_d = arceme_eventdate(ds_d)
     eventdate_dhp = arceme_eventdate(ds_dhp)
 
-    fp_d = @showprogress desc = "Drought Footprint..." map(optical_bands) do band
+    fp_d = @showprogress desc = "Drought Footprint.." map(optical_bands) do band
         arceme_bias_corrected_fp(ds_d[band], ds_d)
     end
     footprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
 
 
-    fp_dhp = @showprogress desc = "DHP Footprint..." map(optical_bands) do band
+    fp_dhp = @showprogress desc = "DHP Footprint......" map(optical_bands) do band
         arceme_bias_corrected_fp(ds_dhp[band], ds_dhp)
     end
     footprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
-    footprints_d = time_aggregate_footprint(footprint_sparse_d, eventdate_d, banddim)
-    footprints_dhp = time_aggregate_footprint(footprint_sparse_dhp, eventdate_dhp, banddim)
+    footprints_d = time_aggregate_footprint(footprint_sparse_d, eventdate_d, banddim, :time_sentinel_2_l2a)
+    footprints_dhp = time_aggregate_footprint(footprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_2_l2a)
 
     Dataset(; footprints_d, footprints_dhp, footprint_sparse_d, footprint_sparse_dhp)
 end
-function time_aggregate_footprint(allbands, eventdate, banddim)
+
+"""
+    arceme_radar_footprints(ds_d, ds_dhp)
+
+Computes footprints for all radar bands in the ARCEME data cube datasets `ds_d` and `ds_dhp`.
+Also aggregates the footprints over time in 2-monthly windows for the whol 2 years around the event date.
+"""
+function arceme_radar_footprints(ds_d, ds_dhp)
+
+    radar_bands = [:vv, :vh]
+    banddim = DD.Dim{:band}(string.(radar_bands))
+    eventdate_d = arceme_eventdate(ds_d)
+    eventdate_dhp = arceme_eventdate(ds_dhp)
+
+    fp_d = map(radar_bands) do band
+        arceme_uncorrected_fp(ds_d[band], ds_d)
+    end
+    footprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
+
+
+    fp_dhp = map(radar_bands) do band
+        arceme_uncorrected_fp(ds_dhp[band], ds_dhp)
+    end
+    footprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
+
+    footprints_d = time_aggregate_footprint(footprint_sparse_d, eventdate_d, banddim, :time_sentinel_1_rtc)
+    footprints_dhp = time_aggregate_footprint(footprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_1_rtc)
+
+    Dataset(; footprints_d, footprints_dhp, footprint_sparse_d, footprint_sparse_dhp)
+end
+
+
+"""
+    arceme_merge_footprints(optical_fp, radar_fp)
+
+Merges the optical and radar footprints datasets into a single dataset.
+"""
+function arceme_merge_footprints(optical_fp, radar_fp)
+    newbands = DD.Dim{:band}([optical_fp.band.val; radar_fp.band.val])
+    newarrays = map((:footprints_d,:footprints_dhp)) do cubename
+        mergeddata = cat(optical_fp[cubename].data ./ typemax(UInt16), radar_fp[cubename].data, dims=3)
+        cubename => YAXArray((radar_fp.lc, radar_fp.Ti, newbands), mergeddata)
+    end
+    Dataset(; newarrays...)
+end
+
+"""
+    arceme_all_footprints(ds_d, ds_dhp)
+
+Computes both optical and radar footprints for the ARCEME data cube datasets `ds_d` and `ds_dhp`.
+Also aggregates the footprints over time in 2-monthly windows for the whol 2 years
+around the event date.
+"""
+function arceme_all_footprints(ds_d, ds_dhp)
+    optical_fp = arceme_optical_band_footprints(ds_d, ds_dhp)
+    radar_fp = arceme_radar_footprints(ds_d, ds_dhp)
+    arceme_merge_footprints(optical_fp, radar_fp)
+end
+
+function time_aggregate_footprint(allbands, eventdate, banddim, timeaxis)
     step_per_year = 6
-    ts = Array(allbands.time_sentinel_2_l2a)
+    ts = Array(DD.dims(allbands, timeaxis))
     data = allbands.data
-    timestep_to_group(t, eventdate, step_per_year) = (clamp(ceil((t - eventdate).value / (365.25 * 24 * 60 * 60 * 1000) * step_per_year), -step_per_year + 1, step_per_year) - 0.5) / step_per_year
+    timestep_to_group(t, eventdate, step_per_year) = (clamp(ceil(Int, (t - eventdate).value / (365.25 * 24 * 60 * 60 * 1000) * step_per_year), -step_per_year + 1, step_per_year))
     groupinds = timestep_to_group.(ts, eventdate, step_per_year)
-    footprint_timesteps = sort(unique(groupinds))
+    @show unique(groupinds)
+    footprint_timesteps = (-step_per_year+1):(step_per_year)
     res = map(footprint_timesteps) do t
         ii = findall(==(t), groupinds)
+        isnothing(ii) && return NaN
         mapslices(data[:, ii, :], dims=2) do sts
             all(ismissing, sts) && return NaN
             mean(skipmissing(sts))
         end
     end
-    YAXArray((allbands.lc, DD.Ti(footprint_timesteps), banddim), cat(res..., dims=2))
+    YAXArray((allbands.lc, DD.Ti((footprint_timesteps .- 0.5) ./ step_per_year .* 12), banddim), cat(res..., dims=2))
 end
+
+
 
 include("spatialdebias.jl")
 end #module

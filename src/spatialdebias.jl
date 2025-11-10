@@ -1,4 +1,4 @@
-export arceme_bias_corrected_fp
+export arceme_bias_corrected_fp, arceme_uncorrected_fp
 
 function sincosparams(c,timname = :time_sentinel_2_l2a)
     fitmat = bare_matrix(c,timname)
@@ -31,13 +31,13 @@ end
 Computes a cloud-biased corrected footprint aggregated by land cover class for the 
 provided inputcube, cloud mask and land cover cube. 
 """
-function arceme_bias_corrected_fp(inputcube, dataset)
+function arceme_bias_corrected_fp(inputcube, dataset, timeaxis=:time_sentinel_2_l2a)
     lccube = dataset.ESA_LC[time=1]
     cloudcube = dataset.cloud_mask
     sclcube = dataset.SCL
     pars = ARCEMEAnalysis.sincosparams(inputcube)[:,:,:,1]
-
-    fitmat = YAXArray((inputcube.time_sentinel_2_l2a, pars.param),ARCEMEAnalysis.bare_matrix(inputcube,:time_sentinel_2_l2a))
+    timdim = DD.dims(inputcube,timeaxis)
+    fitmat = YAXArray((timdim, pars.param),ARCEMEAnalysis.bare_matrix(inputcube,timeaxis))
 
     clearsky_expected = xmap(pars ⊘ :param, fitmat ⊘ :param,inplace=false) do p,t
         p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
@@ -68,10 +68,34 @@ function arceme_bias_corrected_fp(inputcube, dataset)
     classax = DD.Dim{:lc}([arceme_classes[i] for i in classkeys])
 
     Dataset(
-        fp = YAXArray((classax,inputcube.time_sentinel_2_l2a),newdata),
-        fp_uncorrected=YAXArray((classax, inputcube.time_sentinel_2_l2a), fp[classkeys, :]),
-        clearsky_expected = YAXArray((classax,inputcube.time_sentinel_2_l2a),fp_clearsky_expected[classkeys,:]),
-        clouded_expected = YAXArray((classax,inputcube.time_sentinel_2_l2a),fp_clouded_expected[classkeys,:]),
+        fp = YAXArray((classax,timdim),newdata),
+        fp_uncorrected=YAXArray((classax, timdim), fp[classkeys, :]),
+        clearsky_expected = YAXArray((classax,timdim),fp_clearsky_expected[classkeys,:]),
+        clouded_expected = YAXArray((classax,timdim),fp_clouded_expected[classkeys,:]),
+        lc_fractions = YAXArray((classax,),[abundance[i] for i in classkeys])
+    )
+    
+end
+
+"""
+    arceme_uncorrected_fp(inputcube,dataset; timeaxis=:time_sentinel_1_rtc)
+
+Computes a cloud-biased corrected footprint aggregated by land cover class for the 
+provided inputcube, cloud mask and land cover cube. 
+"""
+function arceme_uncorrected_fp(inputcube, dataset;timeaxis=:time_sentinel_1_rtc)
+    lccube = dataset.ESA_LC[time=1]
+    timdim = DD.dims(inputcube,timeaxis)
+    win = YAXArrays.windows(inputcube,lccube,expected_groups=0:100)
+    fp = mean.(win)[:,1,1,:].data
+
+    classkeys = collect(keys(arceme_classes))[2:end]
+    abundance = counter(lccube)
+    sort!(classkeys,by=i->(abundance[i],i),rev=true)
+    classax = DD.Dim{:lc}([arceme_classes[i] for i in classkeys])
+
+    Dataset(
+        fp = YAXArray((classax,timdim),fp[classkeys,:]),
         lc_fractions = YAXArray((classax,),[abundance[i] for i in classkeys])
     )
     
