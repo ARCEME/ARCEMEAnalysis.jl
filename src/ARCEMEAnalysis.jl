@@ -174,13 +174,17 @@ end
 
 Compute the NDVI (Normalized Difference Vegetation Index) for the ARCEME data cube dataset `ds`.
 """
-arceme_ndvi(ds) =
-    broadcast(ds.B04, ds.B08, ds.cloud_mask, ds.SCL) do b4, b8, cl, scl
+function arceme_ndvi(ds)
+    ndvi = broadcast(ds.B04, ds.B08, ds.cloud_mask, ds.SCL) do b4, b8, cl, scl
         (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return NaN
         fb4 = b4 / typemax(Int16)
         fb8 = b8 / typemax(Int16)
         (fb8 - fb4) / (fb8 + fb4)
     end
+    oldcubes = ds.cubes
+    ds.cubes[:ndvi] = ndvi
+    ds
+end
 
 """
     arceme_rgb(ds)

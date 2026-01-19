@@ -71,9 +71,11 @@ function arceme_bias_corrected_fp(band, dataset, timeaxis=:time_sentinel_2_l2a)
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
         fp_uncorrected=YAXArray((classax, timdim), fp[classkeys, :]),
-        clearsky_expected = YAXArray((classax,timdim),fp_clearsky_expected[classkeys,:]),
-        clouded_expected = YAXArray((classax,timdim),fp_clouded_expected[classkeys,:]),
-        lc_fractions = YAXArray((classax,),[abundance[i] for i in classkeys])
+        fp_clearsky_expected=YAXArray((classax, timdim), fp_clearsky_expected[classkeys, :]),
+        fp_clouded_expected=YAXArray((classax, timdim), fp_clouded_expected[classkeys, :]),
+        params=pars,
+        lc_fractions=YAXArray((classax,), [abundance[i] for i in classkeys]),
+        smooth_matrix=fitmat,
     )
     
 end
