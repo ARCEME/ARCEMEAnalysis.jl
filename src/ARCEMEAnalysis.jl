@@ -127,8 +127,8 @@ arceme_landcover(ev::Event) = arceme_landcover(arceme_open(ev))
 
 Open the specified ARCEME data cube from the S3 bucket.
 """
-arceme_open(cubename; batch="SECONDBATCH") =
-    open_dataset("https://s3.waw3-2.cloudferro.com/swift/v1/ARCEME-DATACUBES/$batch/$cubename", force_datetime=true)
+arceme_open(cubename; batch="ARCEME-DATACUBES/SECONDBATCH") =
+    open_dataset("https://s3.waw3-2.cloudferro.com/swift/v1/$batch/$cubename", force_datetime=true)
 
 
 """
