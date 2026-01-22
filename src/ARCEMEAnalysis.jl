@@ -27,7 +27,8 @@ const arceme_classes = SortedDict(
 
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
-    arceme_classes, arceme_landcover, arceme_optical_band_footprints, arceme_radar_footprints
+    arceme_classes, arceme_landcover, arceme_optical_band_footprints, arceme_radar_footprints,
+    time_aggregate_footprint
 
 """
     _arceme_cubenames(;batch="SECONDBATCH")
@@ -195,7 +196,8 @@ arceme_rgb(ds) =
     broadcast(ds.B02, ds.B03, ds.B04) do b, g, r
         m = typemax(Int16)
         # RGB(r / m * 4, g / m * 4, b / m * 4)
-        RGB(min(1.0,r / m *5) , min(1.0,g / m *5) , min(1.0,b / m *5))
+        # RGB(min(1.0,r / m *4) , min(1.0,g / m *4) , min(1.0,b / m *4))
+        RGB(r / m , g / m , b / m )
 end
 
 """
@@ -215,16 +217,18 @@ function arceme_optical_band_footprints(ds_d, ds_dhp)
         arceme_bias_corrected_fp(band, ds_d)
     end
     footprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
-
+    footprint_uncor_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_d), banddim)
 
     fp_dhp = @showprogress desc = "DHP Footprint......" map(optical_bands) do band
         arceme_bias_corrected_fp(band, ds_dhp)
     end
     footprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
+    footprint_uncor_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_dhp), banddim)
+    
     footprints_d = time_aggregate_footprint(footprint_sparse_d, eventdate_d, banddim, :time_sentinel_2_l2a)
     footprints_dhp = time_aggregate_footprint(footprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_2_l2a)
 
-    Dataset(; footprints_d, footprints_dhp, footprint_sparse_d, footprint_sparse_dhp)
+    Dataset(; footprints_d, footprints_dhp, footprint_sparse_d, footprint_sparse_dhp, footprint_uncor_sparse_d, footprint_uncor_sparse_dhp)
 end
 
 """
