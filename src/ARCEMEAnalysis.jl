@@ -27,8 +27,8 @@ const arceme_classes = SortedDict(
 
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
-    arceme_classes, arceme_landcover, arceme_optical_band_footprints, arceme_radar_footprints,
-    time_aggregate_footprint
+    arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
+    time_aggregate_fingerprint
 
 """
     _arceme_cubenames(;batch="SECONDBATCH")
@@ -201,43 +201,43 @@ arceme_rgb(ds) =
 end
 
 """
-    arceme_optical_band_footprints(ds_d, ds_dhp)
+    arceme_optical_band_fingerprints(ds_d, ds_dhp)
 
-Computes footprints for all optical bands in the ARCEME data cube datasets `ds_d` and `ds_dhp`. 
-Also aggregates the footprints over time in 2-monthly windows for the whol 2 years around the event date.
+Computes fingerprints for all optical bands in the ARCEME data cube datasets `ds_d` and `ds_dhp`. 
+Also aggregates the fingerprints over time in 2-monthly windows for the whol 2 years around the event date.
 """
-function arceme_optical_band_footprints(ds_d, ds_dhp)
+function arceme_optical_band_fingerprints(ds_d, ds_dhp)
 
     optical_bands = [:B01, :B02, :B03, :B04, :B05, :B06, :B07, :B08, :B8A, :B09, :B11, :B12]
     banddim = DD.Dim{:band}(string.(optical_bands))
     eventdate_d = arceme_eventdate(ds_d)
     eventdate_dhp = arceme_eventdate(ds_dhp)
 
-    fp_d = @showprogress desc = "Drought Footprint.." map(optical_bands) do band
+    fp_d = @showprogress desc = "Drought fingerprint.." map(optical_bands) do band
         arceme_bias_corrected_fp(band, ds_d)
     end
-    footprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
-    footprint_uncor_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_d), banddim)
+    fingerprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
+    fingerprint_uncor_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_d), banddim)
 
-    fp_dhp = @showprogress desc = "DHP Footprint......" map(optical_bands) do band
+    fp_dhp = @showprogress desc = "DHP fingerprint......" map(optical_bands) do band
         arceme_bias_corrected_fp(band, ds_dhp)
     end
-    footprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
-    footprint_uncor_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_dhp), banddim)
+    fingerprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
+    fingerprint_uncor_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_dhp), banddim)
     
-    footprints_d = time_aggregate_footprint(footprint_sparse_d, eventdate_d, banddim, :time_sentinel_2_l2a)
-    footprints_dhp = time_aggregate_footprint(footprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_2_l2a)
+    fingerprints_d = time_aggregate_fingerprint(fingerprint_sparse_d, eventdate_d, banddim, :time_sentinel_2_l2a)
+    fingerprints_dhp = time_aggregate_fingerprint(fingerprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_2_l2a)
 
-    Dataset(; footprints_d, footprints_dhp, footprint_sparse_d, footprint_sparse_dhp, footprint_uncor_sparse_d, footprint_uncor_sparse_dhp)
+    Dataset(; fingerprints_d, fingerprints_dhp, fingerprint_sparse_d, fingerprint_sparse_dhp, fingerprint_uncor_sparse_d, fingerprint_uncor_sparse_dhp)
 end
 
 """
-    arceme_radar_footprints(ds_d, ds_dhp)
+    arceme_radar_fingerprints(ds_d, ds_dhp)
 
-Computes footprints for all radar bands in the ARCEME data cube datasets `ds_d` and `ds_dhp`.
-Also aggregates the footprints over time in 2-monthly windows for the whol 2 years around the event date.
+Computes fingerprints for all radar bands in the ARCEME data cube datasets `ds_d` and `ds_dhp`.
+Also aggregates the fingerprints over time in 2-monthly windows for the whol 2 years around the event date.
 """
-function arceme_radar_footprints(ds_d, ds_dhp)
+function arceme_radar_fingerprints(ds_d, ds_dhp)
 
     radar_bands = [:vv, :vh]
     banddim = DD.Dim{:band}(string.(radar_bands))
@@ -247,29 +247,29 @@ function arceme_radar_footprints(ds_d, ds_dhp)
     fp_d = map(radar_bands) do band
         arceme_uncorrected_fp(band, ds_d)
     end
-    footprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
+    fingerprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
 
 
     fp_dhp = map(radar_bands) do band
         arceme_uncorrected_fp(band, ds_dhp)
     end
-    footprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
+    fingerprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
 
-    footprints_d = time_aggregate_footprint(footprint_sparse_d, eventdate_d, banddim, :time_sentinel_1_rtc)
-    footprints_dhp = time_aggregate_footprint(footprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_1_rtc)
+    fingerprints_d = time_aggregate_fingerprint(fingerprint_sparse_d, eventdate_d, banddim, :time_sentinel_1_rtc)
+    fingerprints_dhp = time_aggregate_fingerprint(fingerprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_1_rtc)
 
-    Dataset(; footprints_d, footprints_dhp, footprint_sparse_d, footprint_sparse_dhp)
+    Dataset(; fingerprints_d, fingerprints_dhp, fingerprint_sparse_d, fingerprint_sparse_dhp)
 end
 
 
 """
-    arceme_merge_footprints(optical_fp, radar_fp)
+    arceme_merge_fingerprints(optical_fp, radar_fp)
 
-Merges the optical and radar footprints datasets into a single dataset.
+Merges the optical and radar fingerprints datasets into a single dataset.
 """
-function arceme_merge_footprints(optical_fp, radar_fp)
+function arceme_merge_fingerprints(optical_fp, radar_fp)
     newbands = DD.Dim{:band}([optical_fp.band.val; radar_fp.band.val])
-    newarrays = map((:footprints_d,:footprints_dhp)) do cubename
+    newarrays = map((:fingerprints_d,:fingerprints_dhp)) do cubename
         mergeddata = cat(optical_fp[cubename].data ./ typemax(UInt16), radar_fp[cubename].data, dims=3)
         cubename => YAXArray((radar_fp.lc, radar_fp.Ti, newbands), mergeddata)
     end
@@ -277,27 +277,27 @@ function arceme_merge_footprints(optical_fp, radar_fp)
 end
 
 """
-    arceme_all_footprints(ds_d, ds_dhp)
+    arceme_all_fingerprints(ds_d, ds_dhp)
 
-Computes both optical and radar footprints for the ARCEME data cube datasets `ds_d` and `ds_dhp`.
-Also aggregates the footprints over time in 2-monthly windows for the whol 2 years
+Computes both optical and radar fingerprints for the ARCEME data cube datasets `ds_d` and `ds_dhp`.
+Also aggregates the fingerprints over time in 2-monthly windows for the whol 2 years
 around the event date.
 """
-function arceme_all_footprints(ds_d, ds_dhp)
-    optical_fp = arceme_optical_band_footprints(ds_d, ds_dhp)
-    radar_fp = arceme_radar_footprints(ds_d, ds_dhp)
-    arceme_merge_footprints(optical_fp, radar_fp)
+function arceme_all_fingerprints(ds_d, ds_dhp)
+    optical_fp = arceme_optical_band_fingerprints(ds_d, ds_dhp)
+    radar_fp = arceme_radar_fingerprints(ds_d, ds_dhp)
+    arceme_merge_fingerprints(optical_fp, radar_fp)
 end
 
-function time_aggregate_footprint(allbands, eventdate, banddim, timeaxis)
+function time_aggregate_fingerprint(allbands, eventdate, banddim, timeaxis)
     step_per_year = 6
     ts = Array(DD.dims(allbands, timeaxis))
     data = allbands.data
     timestep_to_group(t, eventdate, step_per_year) = (clamp(ceil(Int, (t - eventdate).value / (365.25 * 24 * 60 * 60 * 1000) * step_per_year), -step_per_year + 1, step_per_year))
     groupinds = timestep_to_group.(ts, eventdate, step_per_year)
     @show unique(groupinds)
-    footprint_timesteps = (-step_per_year+1):(step_per_year)
-    res = map(footprint_timesteps) do t
+    fingerprint_timesteps = (-step_per_year+1):(step_per_year)
+    res = map(fingerprint_timesteps) do t
         ii = findall(==(t), groupinds)
         isnothing(ii) && return NaN
         mapslices(data[:, ii, :], dims=2) do sts
@@ -305,7 +305,7 @@ function time_aggregate_footprint(allbands, eventdate, banddim, timeaxis)
             mean(skipmissing(sts))
         end
     end
-    YAXArray((allbands.lc, DD.Ti((footprint_timesteps .- 0.5) ./ step_per_year .* 12), banddim), cat(res..., dims=2))
+    YAXArray((allbands.lc, DD.Ti((fingerprint_timesteps .- 0.5) ./ step_per_year .* 12), banddim), cat(res..., dims=2))
 end
 
 
