@@ -52,6 +52,7 @@ end
 Define a structure to hold information about an ARCEME event.
 """
 struct Event
+    uid::String
     dhp_label::Int
     dlabel::Int
     longitude::Float64
@@ -73,6 +74,7 @@ Get a list of ARCEME events from the local CSV file.
 function arceme_eventlist()
     map(CSV.File(joinpath(@__DIR__, "..", "data", "dhp_global_subselection.csv"))) do row
         Event(
+            row.uid,
             row.dhp_label,
             row.dlabel,
             row.longitude,
@@ -90,11 +92,12 @@ function arceme_eventlist()
 end
 
 arceme_cubename(event::Event) = 
-if event.source == :d
-    "DC__$(event.dlabel)_d__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
-else
-    "DC__$(event.dhp_label)_dhp__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
-end
+"DC__$(event.uid)__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
+# if event.source == :d
+#     "DC__$(event.dlabel)_d__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
+# else
+#     "DC__$(event.dhp_label)_dhp__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
+# end
 
 """
     arceme_eventpairs()
@@ -103,6 +106,17 @@ Get pairs of ARCEME events from the event list.
 """
 arceme_eventpairs() =
     Iterators.partition(sort(arceme_eventlist(),by=i->(i.dhp_label,i.source)),2) |> collect
+
+"""
+    arceme_validpairs(;batch="ARCEME-DC-6", store="https://s3.waw3-2.cloudferro.com/swift/v1")
+
+Get valid pairs of ARCEME events from the data store. Currently only working over HTTP(S)
+"""
+function arceme_validpairs(;batch="ARCEME-DC-6", store="https://s3.waw3-2.cloudferro.com/swift/v1")
+    allpairs = arceme_eventpairs()
+    validpairs = map(x -> all([Zarr.is_zgroup(Zarr.HTTPStore("$store/$batch/$(arceme_cubename(i))"),"") for i in x]), allpairs)
+    allpairs[validpairs]
+end
 
 function arceme_open(event::Event)
     arceme_open(arceme_cubename(event))
@@ -124,11 +138,11 @@ arceme_landcover(ev::Event) = arceme_landcover(arceme_open(ev))
 
 
 """ 
-    arceme_open(cubename; batch="ARCEME-DATACUBES/SECONDBATCH")
+    arceme_open(cubename; batch="ARCEME-DC-6")
 
 Open the specified ARCEME data cube from the S3 bucket.
 """
-arceme_open(cubename; batch="ARCEME-DC-5") =
+arceme_open(cubename; batch="ARCEME-DC-6") =
     open_dataset("https://s3.waw3-2.cloudferro.com/swift/v1/$batch/$cubename", force_datetime=true)
 
 
@@ -178,14 +192,14 @@ Compute the NDVI (Normalized Difference Vegetation Index) for the ARCEME data cu
 function arceme_ndvi(ds)
     ndvi = broadcast(ds.B04, ds.B08, ds.cloud_mask, ds.SCL) do b4, b8, cl, scl
         (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return NaN
-        fb4 = b4 / typemax(Int16)
+        fb4 = b4 / typemax(Int16) # not necessary, right?
         fb8 = b8 / typemax(Int16)
         (fb8 - fb4) / (fb8 + fb4)
     end
-    oldcubes = ds.cubes
     ds.cubes[:ndvi] = ndvi
     ds
 end
+
 
 """
     arceme_rgb(ds)
