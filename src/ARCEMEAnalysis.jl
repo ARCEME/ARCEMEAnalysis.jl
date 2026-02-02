@@ -9,6 +9,8 @@ import CSV
 using Statistics: mean
 using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
+using SpectralIndices: compute_index
+
 include("download.jl")
 
 const arceme_classes = SortedDict(
@@ -29,7 +31,7 @@ const arceme_classes = SortedDict(
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
     arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
-    time_aggregate_fingerprint, arceme_validpairs
+    time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_test
 
 """
     _arceme_cubenames(;batch="6")
@@ -206,14 +208,69 @@ Compute the NDVI (Normalized Difference Vegetation Index) for the ARCEME data cu
 function arceme_ndvi(ds)
     ndvi = broadcast(ds.B04, ds.B08, ds.cloud_mask, ds.SCL) do b4, b8, cl, scl
         (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return NaN
-        fb4 = b4 / typemax(Int16) # not necessary, right?
-        fb8 = b8 / typemax(Int16)
+        fb4 = boa(b4)
+        fb8 = boa(b8)
         (fb8 - fb4) / (fb8 + fb4)
     end
     ds.cubes[:ndvi] = ndvi
     ds
 end
 
+function arceme_test(ds)
+    indices = broadcast(ds.B04, ds.B08, ds.B02, ds.B11, ds.cloud_mask, ds.SCL) do b4, b8, b2, b11, cl, scl
+        (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return NaN
+        fb4 = boa(b4)
+        fb8 = boa(b8)
+        S1 = boa(b11); B = boa(b2)
+        ndvi = (fb8 - fb4) / (fb8 + fb4)
+        bri = ((S1 + fb4) - (fb8 + B))/((S1 + fb4) + (fb8 + B))
+        [ndvi, bri]
+    end
+    # @show typeof(indices)
+    # @show size(indices) # size(indices) = (1000, 1000, 146)
+    ds.cubes[:indices] = indices
+    ds
+end
+# does not return a vector it seems
+
+"""
+    arceme_spectral(ds, indices::Vector{String})
+
+Compute the listed indices using SpectralIndices.jl. Not working.
+"""
+function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2") 
+    if platform=="sentinel2" || platform=="sentinel2a" || platform=="sentinel2b"
+        for index in indices
+            tmp = broadcast(ds.cloud_mask, ds.SCL, ds.B01, ds.B02, ds.B03, ds.B04, ds.B08, ds.B05, ds.B06, ds.B07, ds.B11, ds.B12, ds.B09) do cl, scl, b1, b2, b3, b4, b8, b5, b6, b7, b11, b12, b9
+                # BOA
+                A = boa(b1); B = boa(b2); G = boa(b3); R = boa(b4); N = boa(b8)
+                RE1 = boa(b5); RE2 = boa(b6); RE3 = boa(b7)
+                S1 = boa(b11); S2 = boa(b12);  WV = boa(b9)
+                # apply cloud masking here? (or after)
+                (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return repeat([NaN], length(indices))
+                compute_index(index; A, B, G, R, N, RE1, RE2, RE3, S1, S2, WV, L=0.5)
+            end
+            ds.cubes[Symbol(index)] = tmp
+        end
+    elseif platform=="sentinel1"
+        tmp = broadcast(ds.vv, ds.vh) do VV, VH
+            compute_index(indices; VV,VH)
+        end
+    else
+        error("platform $platform is not supported")
+    end
+    ds.cubes[:spectral] = tmp
+    ds
+end
+
+"""
+    boa(band; BOA_ADD_OFFSET = -1000, QUANTIFICATION_VALUE = 10000)
+
+Compute the radiometric offsets for Sentinel 2 bands to get values at bottom of atmosphere.
+The default values are valid for data processed from baseline 04.00 (January 2022) onwards.
+The entire Sentinel-2 archive in CDSE has been reprocessed and is now available in baseline 05.xx, with consistent offset.
+"""
+boa(band; BOA_ADD_OFFSET = -1000, QUANTIFICATION_VALUE = 10000) = (band + BOA_ADD_OFFSET) / QUANTIFICATION_VALUE
 
 """
     arceme_rgb(ds)
