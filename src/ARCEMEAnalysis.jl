@@ -9,6 +9,7 @@ import CSV
 using Statistics: mean
 using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
+include("download.jl")
 
 const arceme_classes = SortedDict(
   0   => "No data",
@@ -28,19 +29,23 @@ const arceme_classes = SortedDict(
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
     arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
-    time_aggregate_fingerprint
+    time_aggregate_fingerprint, arceme_validpairs
 
 """
-    _arceme_cubenames(;batch="SECONDBATCH")
+    _arceme_cubenames(;batch="6")
 
 List all available data cube names in the specified batch stored in the ARCEME S3 bucket.
 """
-function _arceme_cubenames(; batch="SECONDBATCH")
-    store = S3Store("ARCEME-DATACUBES/", MinioConfig("https://s3.waw3-2.cloudferro.com/swift/v1"))
+function _arceme_cubenames(; batch="ARCEME-DC-6")
+    cubenames = if local_cubepath === nothing
+        store = S3Store("$(batch)/", MinioConfig("https://s3.waw3-2.cloudferro.com/swift/v1"))
 
-    resp = Zarr.cloud_list_objects(store, batch)
-    cubenames = map(split(String(resp), "\n")) do p
-        split(p, "/")[2]
+        resp = Zarr.cloud_list_objects(store, batch)
+        map(split(String(resp), "\n")) do p
+            split(p, "/")[2]
+        end
+    else
+        readdir(joinpath(local_cubepath, batch))
     end
     filter!(startswith("DC"), cubenames)
 end
@@ -114,7 +119,11 @@ Get valid pairs of ARCEME events from the data store. Currently only working ove
 """
 function arceme_validpairs(;batch="ARCEME-DC-6", store="https://s3.waw3-2.cloudferro.com/swift/v1")
     allpairs = arceme_eventpairs()
-    validpairs = map(x -> all([Zarr.is_zgroup(Zarr.HTTPStore("$store/$batch/$(arceme_cubename(i))"),"") for i in x]), allpairs)
+    validpairs = if local_cubepath === nothing
+        map(x -> all([Zarr.is_zgroup(Zarr.HTTPStore("$store/$batch/$(arceme_cubename(i))"), "") for i in x]), allpairs)
+    else
+        map(x -> all([isfile(joinpath(local_cubepath, batch, string(arceme_cubename(i), ".zip"))) for i in x]), allpairs)
+    end
     allpairs[validpairs]
 end
 
@@ -142,8 +151,13 @@ arceme_landcover(ev::Event) = arceme_landcover(arceme_open(ev))
 
 Open the specified ARCEME data cube from the S3 bucket.
 """
-arceme_open(cubename; batch="ARCEME-DC-6") =
-    open_dataset("https://s3.waw3-2.cloudferro.com/swift/v1/$batch/$cubename", force_datetime=true)
+function arceme_open(cubename; batch="ARCEME-DC-6")
+    if local_cubepath === nothing
+        open_dataset("https://s3.waw3-2.cloudferro.com/swift/v1/$batch/$cubename", force_datetime=true)
+    else
+        open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")))
+    end
+end
 
 
 """
