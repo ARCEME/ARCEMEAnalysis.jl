@@ -131,7 +131,7 @@ function arceme_validpairs(;batch="ARCEME-DC-6")
 end
 
 function arceme_open(event::Event; batch="ARCEME-DC-6")
-    arceme_open(arceme_cubename(event); batch="ARCEME-DC-6")
+    arceme_open(arceme_cubename(event); batch=batch)
 end
 
 """
@@ -146,7 +146,7 @@ function arceme_landcover(ds)
         (key=k, class=v, count=count, fraction=count/1000000)
     end
 end
-arceme_landcover(ev::Event) = arceme_landcover(arceme_open(ev))
+arceme_landcover(ev::Event; batch="ARCEME-DC-6") = arceme_landcover(arceme_open(ev, batch=batch))
 
 
 """ 
