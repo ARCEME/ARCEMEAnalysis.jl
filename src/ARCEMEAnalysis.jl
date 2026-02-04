@@ -251,7 +251,15 @@ end
 """
     arceme_spectral(ds, index::String)
 
-Compute index using SpectralIndices.jl. Working but not when data is actually requested
+Compute index using SpectralIndices.jl, e.g. "NDVI". Not Working (when actually requesting the data).
+
+Example:
+validpairs = arceme_validpairs()
+ds_d,ds_dhp = arceme_open.(validpairs[80])
+arceme_spectral(ds_d, "NDVI")
+@time ds_d.NDVI[x=1,y=1,].data[:]
+ERROR: MethodError: no method matching (::XFunction{ARCEMEAnalysis.var"#36#37"{String}, XOutput{Tuple{}, Tuple{}, Int64}, Tuple{}})
+The function `XFunction{ARCEMEAnalysis.var"#36#37"{String}, XOutput{Tuple{}, Tuple{}, Int64}, Tuple{}}(ARCEMEAnalysis.var"#36#37"{String}("NDVI"), XOutput{Tuple{}, Tuple{}, Int64}((), (), 1, Dict{Any, Any}()), (), false)` exists, but no method is defined for this combination of argument types.
 """
 function arceme_spectral(ds, index::String; platform="sentinel2") 
     if platform=="sentinel2" || platform=="sentinel2a" || platform=="sentinel2b"
