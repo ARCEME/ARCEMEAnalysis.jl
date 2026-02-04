@@ -40,7 +40,7 @@ List all available data cube names in the specified batch stored in the ARCEME S
 """
 function _arceme_cubenames(; batch="ARCEME-DC-6")
     cubenames = if local_cubepath === nothing
-        store = S3Store("$(batch)/", MinioConfig("https://s3.waw3-2.cloudferro.com/swift/v1"))
+        store = S3Store("$(batch)/", MinioConfig(httpstore))
 
         resp = Zarr.cloud_list_objects(store, batch)
         map(split(String(resp), "\n")) do p
@@ -115,22 +115,23 @@ arceme_eventpairs() =
     Iterators.partition(sort(arceme_eventlist(),by=i->(i.dhp_label,i.source)),2) |> collect
 
 """
-    arceme_validpairs(;batch="ARCEME-DC-6", store="https://s3.waw3-2.cloudferro.com/swift/v1")
+    arceme_validpairs(;batch="ARCEME-DC-6")
 
-Get valid pairs of ARCEME events from the data store. Currently only working over HTTP(S)
+Get valid pairs of ARCEME events from the local path (if set with arceme_set_localpath) or the http data store.
+Default httpstore is "https://s3.waw3-2.cloudferro.com/swift/v1". It can be reset with arceme_set_httpstore.
 """
-function arceme_validpairs(;batch="ARCEME-DC-6", store="https://s3.waw3-2.cloudferro.com/swift/v1")
+function arceme_validpairs(;batch="ARCEME-DC-6")
     allpairs = arceme_eventpairs()
     validpairs = if local_cubepath === nothing
-        map(x -> all([Zarr.is_zgroup(Zarr.HTTPStore("$store/$batch/$(arceme_cubename(i))"), "") for i in x]), allpairs)
+        map(x -> all([Zarr.is_zgroup(Zarr.HTTPStore("$httpstore/$batch/$(arceme_cubename(i))"), "") for i in x]), allpairs)
     else
         map(x -> all([isfile(joinpath(local_cubepath, batch, string(arceme_cubename(i), ".zip"))) for i in x]), allpairs)
     end
     allpairs[validpairs]
 end
 
-function arceme_open(event::Event)
-    arceme_open(arceme_cubename(event))
+function arceme_open(event::Event; batch="ARCEME-DC-6")
+    arceme_open(arceme_cubename(event); batch="ARCEME-DC-6")
 end
 
 """
@@ -151,11 +152,12 @@ arceme_landcover(ev::Event) = arceme_landcover(arceme_open(ev))
 """ 
     arceme_open(cubename; batch="ARCEME-DC-6")
 
-Open the specified ARCEME data cube from the S3 bucket.
+Open the specified ARCEME data cube from the local path (if with arceme_set_localpath) or 
+    the httpstore (default "https://s3.waw3-2.cloudferro.com/swift/v1", reset with arceme_set_httpstore).
 """
 function arceme_open(cubename; batch="ARCEME-DC-6")
     if local_cubepath === nothing
-        open_dataset("https://s3.waw3-2.cloudferro.com/swift/v1/$batch/$cubename", force_datetime=true)
+        open_dataset("$httpstore/$batch/$cubename", force_datetime=true)
     else
         open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")))
     end
