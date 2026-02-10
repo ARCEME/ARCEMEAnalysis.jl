@@ -9,7 +9,7 @@ import CSV
 using Statistics: mean
 using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
-using SpectralIndices: compute_index
+using SpectralIndices: compute_index, SpectralIndices
 
 include("download.jl")
 
@@ -218,25 +218,23 @@ function arceme_ndvi(ds)
     ds
 end
 
+#Helper functions to compute the indices from named tuples for type stability
+compute_indexx(index::SpectralIndices.SpectralIndex{<:Any,B}, params::NamedTuple) where B = index.compute(Float64, params[B]...)
+function listofindices(indices, values)
+    map(indices) do index
+        compute_indexx(index, values)
+    end
+end
+
 """
     arceme_spectral(ds, indices::Vector{String})
 
 Compute the listed indices using SpectralIndices.jl. Not working.
 """
 function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2") 
-    if platform=="sentinel2" || platform=="sentinel2a" || platform=="sentinel2b"
-        for index in indices
-            tmp = broadcast(ds.cloud_mask, ds.SCL, ds.B01, ds.B02, ds.B03, ds.B04, ds.B08, ds.B05, ds.B06, ds.B07, ds.B11, ds.B12, ds.B09) do cl, scl, b1, b2, b3, b4, b8, b5, b6, b7, b11, b12, b9
-                # BOA
-                A = boa(b1); B = boa(b2); G = boa(b3); R = boa(b4); N = boa(b8)
-                RE1 = boa(b5); RE2 = boa(b6); RE3 = boa(b7)
-                S1 = boa(b11); S2 = boa(b12);  WV = boa(b9)
-                # apply cloud masking here? (or after)
-                (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return repeat([NaN], length(indices))
-                compute_index(index; A, B, G, R, N, RE1, RE2, RE3, S1, S2, WV, L=0.5)
-            end
-            ds.cubes[Symbol(index)] = tmp
-        end
+    tmp = if platform == "sentinel2" || platform == "sentinel2a" || platform == "sentinel2b"
+        pl = platform == "sentinel2" ? "sentinel2a" : platform
+        _compute_indices(ds, indices, pl)
     elseif platform=="sentinel1"
         tmp = broadcast(ds.vv, ds.vh) do VV, VH
             compute_index(indices; VV,VH)
@@ -244,7 +242,9 @@ function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2")
     else
         error("platform $platform is not supported")
     end
-    ds.cubes[:spectral] = tmp
+    foreach(pairs(tmp)) do (k,v)
+        ds.cubes[k] = v
+    end
     ds
 end
 
@@ -416,4 +416,5 @@ end
 
 
 include("spatialdebias.jl")
+include("spectral_helpers.jl")
 end #module
