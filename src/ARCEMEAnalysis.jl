@@ -11,8 +11,6 @@ using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
 using SpectralIndices: compute_index, SpectralIndices
 
-include("download.jl")
-
 const arceme_classes = SortedDict(
   0   => "No data",
   10  => "Tree cover",
@@ -413,8 +411,13 @@ function time_aggregate_fingerprint(allbands, eventdate, banddim, timeaxis)
     YAXArray((allbands.lc, DD.Ti((fingerprint_timesteps .- 0.5) ./ step_per_year .* 12), banddim), cat(res..., dims=2))
 end
 
+using Reexport: @reexport
 
-
+include("download.jl")
 include("spatialdebias.jl")
 include("spectral_helpers.jl")
+include("hrl_helpers.jl")
+
+@reexport using .HRL
+
 end #module
