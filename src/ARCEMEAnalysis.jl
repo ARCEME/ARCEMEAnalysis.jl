@@ -14,15 +14,6 @@ import Proj
 import SpectralIndices as SI
 import GeoJSON
 
-function __init__()
-    #Extend SpectralIndices band definitions with S1 bands
-    s1vv = Dict{String,SI.PlatformBand}("sentinel1" => SI.PlatformBand("sentinel1", "VV", "Vertical-Vertical", 5.55e7, 1e5))
-    s1vh = Dict{String,SI.PlatformBand}("sentinel1" => SI.PlatformBand("sentinel1", "VH", "Vertical-Horizontal", 5.55e7, 1e5))
-
-    SI.bands["VV"] = SI.Band("VV", "Vertical-Vertical", "vv", 5.54e7, 5.56e7, s1vv)
-    SI.bands["VH"] = SI.Band("VH", "Vertical-Horizontal", "vh", 5.54e7, 5.56e7, s1vh)
-end
-
 const arceme_classes = SortedDict(
   0   => "No data",
   10  => "Tree cover",
