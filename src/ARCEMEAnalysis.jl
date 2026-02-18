@@ -21,10 +21,6 @@ function __init__()
     SI.bands["VH"] = SI.Band("VH", "Vertical-Horizontal", "vh", 5.54e7, 5.56e7, s1vh)
 end
 
-
-include("download.jl")
-include("s1_helpers.jl")
-
 const arceme_classes = SortedDict(
   0   => "No data",
   10  => "Tree cover",
@@ -427,7 +423,14 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
 end
 
 
+using Reexport: @reexport
 
+include("download.jl")
 include("spatialdebias.jl")
 include("spectral_helpers.jl")
+include("s1_helpers.jl")
+include("hrl_helpers.jl")
+
+@reexport using .HRL
+
 end #module
