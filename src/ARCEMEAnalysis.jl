@@ -10,6 +10,7 @@ using Statistics: mean
 using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
 using SpectralIndices: compute_index, SpectralIndices
+import Proj
 
 const arceme_classes = SortedDict(
   0   => "No data",
