@@ -10,6 +10,7 @@ using Statistics: mean
 using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
 using SpectralIndices: compute_index, SpectralIndices
+import Proj
 import SpectralIndices as SI
 
 function __init__()
