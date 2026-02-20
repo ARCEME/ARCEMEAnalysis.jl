@@ -32,7 +32,7 @@ Computes a cloud-biased corrected footprint aggregated by land cover class for t
 provided inputcube, cloud mask and land cover cube. 
 """
 function arceme_bias_corrected_fp(band, dataset, timeaxis=:time_sentinel_2_l2a)
-    lccube = dataset.ESA_LC[time=1]
+    lccube = lckeymap.(dataset.ESA_LC[time=1])
     cloudcube = dataset.cloud_mask
     sclcube = dataset.SCL
     inputcube = dataset[band]
@@ -43,38 +43,34 @@ function arceme_bias_corrected_fp(band, dataset, timeaxis=:time_sentinel_2_l2a)
     clearsky_expected = xmap(pars ⊘ :param, fitmat ⊘ :param,inplace=false) do p,t
         p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
     end
-    win_clearsky = YAXArrays.windows(clearsky_expected,lccube,expected_groups=0:100)
+    win_clearsky = YAXArrays.windows(clearsky_expected,lccube,expected_groups=1:11)
     fp_clearsky_expected = mean.(win_clearsky)[:,1,1,1,:].data
 
     clouded_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, cloudcube, sclcube, inplace=false) do p, t, cl, scl
-        if (cl > 0 || scl in (1, 3, 7, 8, 9, 10, 11))
+        if _is_cloud(cl,scl)
             return NaN
         else
             p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
         end
     end
-    win_clouded = YAXArrays.windows(clouded_expected,lccube,expected_groups=0:100)
+    win_clouded = YAXArrays.windows(clouded_expected,lccube,expected_groups=1:11)
     fp_clouded_expected = mean.(win_clouded)[:,1,1,1,:].data
 
     inputcube_filtered = xmap(inputcube, cloudcube,sclcube,inplace=false,output=XOutput(outtype=Float32)) do x,cl,scl
-        (cl > 0 || scl in (1, 3, 7, 8, 9, 10, 11)) ? NaN : x
+        _is_cloud(cl,scl) ? NaN : x
     end
-    win_data = YAXArrays.windows(inputcube_filtered,lccube,expected_groups=0:100)
+    win_data = YAXArrays.windows(inputcube_filtered,lccube,expected_groups=1:11)
     fp = mean.(win_data)[:,1,1,:].data
 
-    classkeys = collect(keys(arceme_classes))[2:end]
-    abundance = counter(lccube)
-    sort!(classkeys,by=i->(abundance[i],i),rev=true)
-    newdata = fp[classkeys,:] .+ fp_clearsky_expected[classkeys,:] .- fp_clouded_expected[classkeys,:]
-    classax = DD.Dim{:lc}([arceme_classes[i] for i in classkeys])
+    newdata = fp[:,:] .+ fp_clearsky_expected[:,:] .- fp_clouded_expected[:,:]
+    classax = DD.Dim{:lc}(collect(values(arceme_classes))[2:end])
 
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
-        fp_uncorrected=YAXArray((classax, timdim), fp[classkeys, :]),
-        fp_clearsky_expected=YAXArray((classax, timdim), fp_clearsky_expected[classkeys, :]),
-        fp_clouded_expected=YAXArray((classax, timdim), fp_clouded_expected[classkeys, :]),
+        fp_uncorrected=YAXArray((classax, timdim), fp[:, :]),
+        fp_clearsky_expected=YAXArray((classax, timdim), fp_clearsky_expected[:, :]),
+        fp_clouded_expected=YAXArray((classax, timdim), fp_clouded_expected[:, :]),
         params=pars,
-        lc_fractions=YAXArray((classax,), [abundance[i] for i in classkeys]),
         smooth_matrix=fitmat,
     )
     
@@ -87,11 +83,11 @@ Computes a cloud-biased corrected footprint aggregated by land cover class for t
 provided inputcube, cloud mask and land cover cube. 
 """
 function arceme_uncorrected_fp(band, dataset;timeaxis=:time_sentinel_1_rtc)
-    lccube = dataset.ESA_LC[time=1]
+    lccube = lckeymap.(dataset.ESA_LC[time=1])
     inputcube = dataset[band]
     timdim = DD.dims(inputcube,timeaxis)
     
-    win = YAXArrays.windows(inputcube,lccube,expected_groups=0:100)
+    win = YAXArrays.windows(inputcube,lccube,expected_groups=1:11)
     fp = mean.(win)[:,1,1,:].data
 
     classkeys = collect(keys(arceme_classes))[2:end]

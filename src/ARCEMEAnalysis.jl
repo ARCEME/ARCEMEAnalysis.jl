@@ -1,7 +1,7 @@
 module ARCEMEAnalysis
 using Zarr: S3Store, Zarr
 using Minio: MinioConfig
-using YAXArrays: open_dataset, ⊘, xmap, XOutput, YAXArray, YAXArrays, Dataset
+using YAXArrays: open_dataset, ⊘, xmap, XOutput, YAXArray, YAXArrays, Dataset, setchunks, compute_to_zarr, savedataset
 import DimensionalData as DD
 using Colors: RGB
 using Dates: DateTime, Year, Date
@@ -10,8 +10,20 @@ using Statistics: mean
 using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
 using SpectralIndices: compute_index, SpectralIndices
+import SpectralIndices as SI
+
+function __init__()
+    #Extend SpectralIndices band definitions with S1 bands
+    s1vv = Dict{String,SI.PlatformBand}("sentinel1" => SI.PlatformBand("sentinel1", "VV", "Vertical-Vertical", 5.55e7, 1e5))
+    s1vh = Dict{String,SI.PlatformBand}("sentinel1" => SI.PlatformBand("sentinel1", "VH", "Vertical-Horizontal", 5.55e7, 1e5))
+
+    SI.bands["VV"] = SI.Band("VV", "Vertical-Vertical", "vv", 5.54e7, 5.56e7, s1vv)
+    SI.bands["VH"] = SI.Band("VH", "Vertical-Horizontal", "vh", 5.54e7, 5.56e7, s1vh)
+end
+
 
 include("download.jl")
+include("s1_helpers.jl")
 
 const arceme_classes = SortedDict(
   0   => "No data",
@@ -27,11 +39,12 @@ const arceme_classes = SortedDict(
   95  => "Mangroves",
   100 => "Moss and lichen",
 )
+lckeymap(k) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
 
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
     arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
-    time_aggregate_fingerprint, arceme_validpairs, arceme_spectral
+    time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db
 
 """
     _arceme_cubenames(;batch="6")
@@ -159,7 +172,16 @@ function arceme_open(cubename; batch="ARCEME-DC-6")
     if local_cubepath === nothing
         open_dataset("$httpstore/$batch/$cubename", force_datetime=true)
     else
-        open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")))
+        main_ds = open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")))
+        if isfile(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
+            index_ds = open_dataset(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
+            for (k, v) in (index_ds.cubes)
+                main_ds.cubes[k] = v
+            end
+            return main_ds
+        else
+            return main_ds
+        end
     end
 end
 
@@ -209,21 +231,13 @@ Compute the NDVI (Normalized Difference Vegetation Index) for the ARCEME data cu
 """
 function arceme_ndvi(ds)
     ndvi = broadcast(ds.B04, ds.B08, ds.cloud_mask, ds.SCL) do b4, b8, cl, scl
-        (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return NaN
+        _is_cloud(cl, scl) && return NaN
         fb4 = boa(b4)
         fb8 = boa(b8)
         (fb8 - fb4) / (fb8 + fb4)
     end
     ds.cubes[:ndvi] = ndvi
     ds
-end
-
-#Helper functions to compute the indices from named tuples for type stability
-compute_indexx(index::SpectralIndices.SpectralIndex{<:Any,B}, params::NamedTuple) where B = index.compute(Float64, params[B]...)
-function listofindices(indices, values)
-    map(indices) do index
-        compute_indexx(index, values)
-    end
 end
 
 """
@@ -236,9 +250,7 @@ function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2")
         pl = platform == "sentinel2" ? "sentinel2a" : platform
         _compute_indices(ds, indices, pl)
     elseif platform=="sentinel1"
-        tmp = broadcast(ds.vv, ds.vh) do VV, VH
-            compute_index(indices; VV,VH)
-        end
+        _compute_indices(ds, indices, platform)
     else
         error("platform $platform is not supported")
     end
@@ -248,40 +260,9 @@ function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2")
     ds
 end
 
-"""
-    arceme_spectral(ds, index::String)
+_is_cloud(cl, scl) = (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11)))
 
-Compute index using SpectralIndices.jl, e.g. "NDVI". Not Working (when actually requesting the data).
 
-Example:
-validpairs = arceme_validpairs()
-ds_d,ds_dhp = arceme_open.(validpairs[80])
-arceme_spectral(ds_d, "NDVI")
-@time ds_d.NDVI[x=1,y=1,].data[:]
-ERROR: MethodError: no method matching (::XFunction{ARCEMEAnalysis.var"#36#37"{String}, XOutput{Tuple{}, Tuple{}, Int64}, Tuple{}})
-The function `XFunction{ARCEMEAnalysis.var"#36#37"{String}, XOutput{Tuple{}, Tuple{}, Int64}, Tuple{}}(ARCEMEAnalysis.var"#36#37"{String}("NDVI"), XOutput{Tuple{}, Tuple{}, Int64}((), (), 1, Dict{Any, Any}()), (), false)` exists, but no method is defined for this combination of argument types.
-"""
-function arceme_spectral(ds, index::String; platform="sentinel2") 
-    if platform=="sentinel2" || platform=="sentinel2a" || platform=="sentinel2b"
-        tmp = broadcast(ds.cloud_mask, ds.SCL, ds.B01, ds.B02, ds.B03, ds.B04, ds.B08, ds.B05, ds.B06, ds.B07, ds.B11, ds.B12, ds.B09) do cl, scl, b1, b2, b3, b4, b8, b5, b6, b7, b11, b12, b9
-            # BOA
-            A = boa(b1); B = boa(b2); G = boa(b3); R = boa(b4); N = boa(b8)
-            RE1 = boa(b5); RE2 = boa(b6); RE3 = boa(b7)
-            S1 = boa(b11); S2 = boa(b12);  WV = boa(b9)
-            # apply cloud masking here? (or after)
-            (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11))) && return NaN
-            compute_index(index; A, B, G, R, N, RE1, RE2, RE3, S1, S2, WV, L=0.5)
-        end
-        ds.cubes[Symbol(index)] = tmp
-    elseif platform=="sentinel1"
-        tmp = broadcast(ds.vv, ds.vh) do VV, VH
-            compute_index(index; VV,VH)
-        end
-    else
-        error("platform $platform is not supported")
-    end
-    ds
-end
 
 """
     boa(band; BOA_ADD_OFFSET = -1000, QUANTIFICATION_VALUE = 10000)
@@ -302,7 +283,7 @@ arceme_rgb(ds) =
         # m = typemax(Int16)
         # RGB(r / m * 4, g / m * 4, b / m * 4)
         # RGB(min(1.0,r / m *4) , min(1.0,g / m *4) , min(1.0,b / m *4))
-        RGB(boa(r), boa(g), boa(b))
+        RGB(clamp(boa(r), 0, 1), clamp(boa(g), 0, 1), clamp(boa(b), 0, 1))
 end
 
 """
@@ -411,6 +392,38 @@ function time_aggregate_fingerprint(allbands, eventdate, banddim, timeaxis)
         end
     end
     YAXArray((allbands.lc, DD.Ti((fingerprint_timesteps .- 0.5) ./ step_per_year .* 12), banddim), cat(res..., dims=2))
+end
+
+"""
+For every valid event pair creates a and stores data cubes of a list of precomputed vegetation indices. For kNDVI 
+a shared sigma parameter per land cover class is computed.
+"""
+function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])
+
+    for ev in arceme_validpairs()
+
+        ds_pair = arceme_open.(ev)
+
+        foreach(ds_pair) do ds
+            arceme_spectral(ds, indices_s1, platform="sentinel1")
+            arceme_spectral(ds, indices_s2, platform="sentinel2")
+            arceme_radar_db(ds)
+        end
+        ARCEMEAnalysis.arceme_kndvi_pair(ds_pair...)
+
+        fields_to_save = [indices_s1; indices_s2]
+
+        foreach(ds_pair, ev) do ds, event
+            output_base = "$local_cubepath/ARCEME-DC-6-INDICES"
+            name = arceme_cubename(event)
+            indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
+            compute_to_zarr(indexcube, joinpath(output_base, name), overwrite=true)
+            cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
+            savedataset(cube2, path=joinpath(output_base, name), append=true)
+            run(Cmd(`zip -0 -r ../$(name).zip .`, dir=joinpath(output_base, name)))
+            rm(joinpath(output_base, name), recursive=true)
+        end
+    end
 end
 
 
