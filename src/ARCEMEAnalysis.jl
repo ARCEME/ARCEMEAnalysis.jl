@@ -417,7 +417,7 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
             output_base = "$local_cubepath/ARCEME-DC-6-INDICES"
             name = arceme_cubename(event)
             indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
-            compute_to_zarr(indexcube, joinpath(output_base, name), overwrite=true)
+            compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
             cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
             savedataset(cube2, path=joinpath(output_base, name), append=true)
             run(Cmd(`zip -0 -r ../$(name).zip .`, dir=joinpath(output_base, name)))

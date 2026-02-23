@@ -3,13 +3,6 @@ import DiskArrayEngine as DAE
 import OnlineStats
 import CSV
 
-function load_sigmadata()
-    CSV.read(joinpath(@__DIR__, "..", "data", "sigmalist.csv"), NamedTuple)
-end
-
-const sigmadata = load_sigmadata()
-
-
 normalize_name(n) = match(r"B\d", n) !== nothing ? Symbol("B0$(last(n))") :
                     in(n, ("VH", "VV")) ? Symbol(lowercase(n)) : Symbol(n)
 struct NTWrapper{F,names,C,I} <: Function
