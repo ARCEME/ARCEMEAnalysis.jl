@@ -3,7 +3,7 @@ using ProgressMeter
 using HTTP, JSON
 using ZipArchives
 using Preferences: @set_preferences!, @load_preference
-export arceme_set_localpath, arceme_set_httpstore
+export arceme_set_localpath, arceme_set_httpstore, arceme_download_batch
 
 """
 arceme_set_httpstore(httpstore)
@@ -36,6 +36,11 @@ function arceme_download_batch(batch="ARCEME-DC-6")
     if local_cubepath === nothing
         error("You need to set the local cube path first. Please run `arceme_localpath(path)` first.")
     end
+
+    if !isdir(joinpath(local_cubepath,batch))
+        mkdir(joinpath(local_cubepath,batch))
+    end
+
     aresp = HTTP.get("$httpstore/$batch/",query=Dict("format"=>"json","delimiter"=>"/"))
     allarrays = map(i->strip(i["subdir"],'/'),JSON.parse(aresp.body))
 
