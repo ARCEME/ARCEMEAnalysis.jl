@@ -478,7 +478,10 @@ function hrl_warp(cubename, fnames::Vector; batch="ARCEME-DC-6")
         path=joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$(split(cubename,".")[1]).zarr"), 
         append=true)
     end
-    return joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$(split(cubename,".")[1]).zarr")
+    # zip
+    run(Cmd(`zip -0 -r ../$(split(cubename,".")[1]).zarr.zip .`, dir=joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$(split(cubename,".")[1]).zarr")))
+    rm(joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$(split(cubename,".")[1]).zarr"), recursive=true)
+    return joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$(split(cubename,".")[1]).zarr.zip")
 end
 
 hrl_warp(event::ARCEMEAnalysis.Event; kwargs...) = hrl_warp(arceme_cubename(event); kwargs...)
