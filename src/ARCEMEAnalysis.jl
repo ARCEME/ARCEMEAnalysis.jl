@@ -12,6 +12,7 @@ using ProgressMeter: @showprogress
 using SpectralIndices: compute_index, SpectralIndices
 import Proj
 import SpectralIndices as SI
+import GeoJSON
 
 function __init__()
     #Extend SpectralIndices band definitions with S1 bands
@@ -70,39 +71,57 @@ Define a structure to hold information about an ARCEME event.
 """
 struct Event
     uid::String
-    dhp_label::Int
-    dlabel::Int
+    event_label::Int
+    # dlabel::Int
     longitude::Float64
     latitude::Float64
-    tp::Float64
+    # tp::Float64
     eventdate::DateTime
     source::Symbol
-    unveg::Float64
-    sparse::Float64
-    teow::Int
-    biome::String
+    # unveg::Float64
+    # sparse::Float64
+    # teow::Int
+    # biome::String
 end
 
 """
     arceme_eventlist()
+    arceme_eventlist(csv="path2file.csv")
 
-Get a list of ARCEME events from the local CSV file.
+    arceme_eventlist(source::String)
+    arceme_eventlist(source::String; geojson="path2file.geojson")
+
+Get a list of ARCEME events from the local CSV or geojson file.
 """
-function arceme_eventlist()
-    map(CSV.File(joinpath(@__DIR__, "..", "data", "dhp_global_subselection.csv"))) do row
+function arceme_eventlist(;csv=joinpath(@__DIR__, "..","data","dhp_global_subselection.csv"))
+    map(CSV.File(csv)) do row
         Event(
             row.uid,
             row.dhp_label,
-            row.dlabel,
+            # row.dlabel,
             row.longitude,
             row.latitude,
-            row.tp_int,
+            # row.tp_int,
             DateTime(row.date),
             Symbol(row.source),
-            row.unveg,
-            row.sparse,
-            row.teow,
-            row.biome,
+            # row.unveg,
+            # row.sparse,
+            # row.teow,
+            # row.biome,
+
+        )
+    end
+end
+
+function arceme_eventlist(source::String; geojson=joinpath(@__DIR__, "..","data/selection_eu_wocat_dhp_qdoy_hrl.geojson")) 
+    map(GeoJSON.read(geojson)) do row
+        Event(
+            row.uid,
+            row.dhp_label,
+            row.geometry[1],
+            row.geometry[2],
+            DateTime(row.startdate),
+            Symbol(source),
 
         )
     end
@@ -110,11 +129,6 @@ end
 
 arceme_cubename(event::Event) = 
 "DC__$(event.uid)__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
-# if event.source == :d
-#     "DC__$(event.dlabel)_d__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
-# else
-#     "DC__$(event.dhp_label)_dhp__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
-# end
 
 """
     arceme_eventpairs()
@@ -122,7 +136,7 @@ arceme_cubename(event::Event) =
 Get pairs of ARCEME events from the event list.
 """
 arceme_eventpairs() =
-    Iterators.partition(sort(arceme_eventlist(),by=i->(i.dhp_label,i.source)),2) |> collect
+    Iterators.partition(sort(arceme_eventlist(),by=i->(i.event_label,i.source)),2) |> collect
 
 """
     arceme_validpairs(;batch="ARCEME-DC-6")
@@ -175,10 +189,15 @@ function arceme_open(cubename; batch="ARCEME-DC-6")
             for (k, v) in (index_ds.cubes)
                 main_ds.cubes[k] = v
             end
-            return main_ds
-        else
-            return main_ds
         end
+        if isfile(joinpath(local_cubepath, "$batch-HRL", string(cubename, ".zip")))
+            hrl_ds = open_dataset(joinpath(local_cubepath, "$batch-HRL", string(cubename, ".zip")))
+            for (k, v) in (hrl_ds.cubes)
+                main_ds.cubes[k] = v
+            end
+        end
+        
+        return main_ds
     end
 end
 
