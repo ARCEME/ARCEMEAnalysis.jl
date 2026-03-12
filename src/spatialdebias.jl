@@ -43,7 +43,7 @@ function arceme_bias_corrected_fp(band, dataset, timeaxis=:time_sentinel_2_l2a)
     clearsky_expected = xmap(pars ⊘ :param, fitmat ⊘ :param,inplace=false) do p,t
         p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
     end
-    win_clearsky = YAXArrays.windows(clearsky_expected,lccube,expected_groups=1:11)
+    win_clearsky = YAXArrays.windows(clearsky_expected, lccube, expected_groups=1:12)
     fp_clearsky_expected = mean.(win_clearsky)[:,1,1,1,:].data
 
     clouded_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, cloudcube, sclcube, inplace=false) do p, t, cl, scl
@@ -53,17 +53,17 @@ function arceme_bias_corrected_fp(band, dataset, timeaxis=:time_sentinel_2_l2a)
             p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
         end
     end
-    win_clouded = YAXArrays.windows(clouded_expected,lccube,expected_groups=1:11)
+    win_clouded = YAXArrays.windows(clouded_expected, lccube, expected_groups=1:12)
     fp_clouded_expected = mean.(win_clouded)[:,1,1,1,:].data
 
     inputcube_filtered = xmap(inputcube, cloudcube,sclcube,inplace=false,output=XOutput(outtype=Float32)) do x,cl,scl
         _is_cloud(cl,scl) ? NaN : x
     end
-    win_data = YAXArrays.windows(inputcube_filtered,lccube,expected_groups=1:11)
+    win_data = YAXArrays.windows(inputcube_filtered, lccube, expected_groups=1:12)
     fp = mean.(win_data)[:,1,1,:].data
 
     newdata = fp[:,:] .+ fp_clearsky_expected[:,:] .- fp_clouded_expected[:,:]
-    classax = DD.Dim{:lc}(collect(values(arceme_classes))[2:end])
+    classax = DD.Dim{:lc}(collect(values(arceme_classes)))
 
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
@@ -87,17 +87,16 @@ function arceme_uncorrected_fp(band, dataset;timeaxis=:time_sentinel_1_rtc)
     inputcube = dataset[band]
     timdim = DD.dims(inputcube,timeaxis)
     
-    win = YAXArrays.windows(inputcube,lccube,expected_groups=1:11)
+    win = YAXArrays.windows(inputcube, lccube, expected_groups=1:12)
     fp = mean.(win)[:,1,1,:].data
 
-    classkeys = collect(keys(arceme_classes))[2:end]
     abundance = counter(lccube)
-    sort!(classkeys,by=i->(abundance[i],i),rev=true)
-    classax = DD.Dim{:lc}([arceme_classes[i] for i in classkeys])
+    classax = DD.Dim{:lc}(collect(values(arceme_classes))[1:end])
+
 
     Dataset(
-        fp = YAXArray((classax,timdim),fp[classkeys,:]),
-        lc_fractions = YAXArray((classax,),[abundance[i] for i in classkeys])
+        fp=YAXArray((classax, timdim), fp),
+        lc_fractions=YAXArray((classax,), [abundance[i] for i in 1:12])
     )
     
 end
