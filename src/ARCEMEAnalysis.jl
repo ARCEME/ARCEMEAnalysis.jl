@@ -143,8 +143,8 @@ function arceme_validpairs(;batch="ARCEME-DC-6")
     allpairs[validpairs]
 end
 
-function arceme_open(event::Event; batch="ARCEME-DC-6")
-    arceme_open(arceme_cubename(event); batch=batch)
+function arceme_open(event::Event; batch="ARCEME-DC-6", indices=true)
+    arceme_open(arceme_cubename(event); batch=batch, indices=indices)
 end
 
 """
@@ -168,12 +168,12 @@ arceme_landcover(ev::Event; batch="ARCEME-DC-6") = arceme_landcover(arceme_open(
 Open the specified ARCEME data cube from the local path (if with arceme_set_localpath) or 
     the httpstore (default "https://s3.waw3-2.cloudferro.com/swift/v1", reset with arceme_set_httpstore).
 """
-function arceme_open(cubename; batch="ARCEME-DC-6")
+function arceme_open(cubename; batch="ARCEME-DC-6", indices=true)
     if local_cubepath === nothing
         open_dataset("$httpstore/$batch/$cubename", force_datetime=true)
     else
         main_ds = open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")))
-        if isfile(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
+        if indices && isfile(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
             index_ds = open_dataset(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
             for (k, v) in (index_ds.cubes)
                 main_ds.cubes[k] = v
@@ -398,11 +398,11 @@ end
 For every valid event pair creates a and stores data cubes of a list of precomputed vegetation indices. For kNDVI 
 a shared sigma parameter per land cover class is computed.
 """
-function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])
+function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], subset=:)
 
-    for ev in arceme_validpairs()
+    for ev in arceme_validpairs()[subset]
 
-        ds_pair = arceme_open.(ev)
+        ds_pair = arceme_open.(ev, indices=false)
 
         foreach(ds_pair) do ds
             arceme_spectral(ds, indices_s1, platform="sentinel1")
@@ -420,10 +420,36 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
             compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
             cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
             savedataset(cube2, path=joinpath(output_base, name), append=true)
-            run(Cmd(`zip -0 -r ../$(name).zip .`, dir=joinpath(output_base, name)))
+            isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
+            run(Cmd(`7z a -tzip -mx=0 ../$(name).zip .`, dir=joinpath(output_base, name)))
             rm(joinpath(output_base, name), recursive=true)
         end
     end
+end
+
+function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])
+
+    #banddim = DD.Dim{:band}(string.(optical_bands))
+    indices_s2 = filter(i -> in(Symbol(i), keys(ds.cubes)), indices_s2) |> collect
+    indices_s1 = filter(i -> in(Symbol(i), keys(ds.cubes)), indices_s1) |> collect
+    if isempty(indices_s1) || isempty(indices_s2)
+        return nothing
+    end
+    indexdim_s2 = DD.Dim{:band_s2}(indices_s2)
+    indexdim_s1 = DD.Dim{:band_s1}(indices_s1)
+    #eventdate = arceme_eventdate(ds)
+    fp_s2 = @showprogress desc = "S2 fingerprint.." map(indices_s2) do band
+        arceme_bias_corrected_fp(band, ds)
+    end
+    fingerprint_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
+    fingerprint_uncor_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
+    #fingerprints_s2 = time_aggregate_fingerprint(fingerprint_sparse_s2, eventdate, indexdim_s2, :time_sentinel_2_l2a)
+
+    fp_s1 = @showprogress desc = "S1 fingerprint.." map(indices_s1) do band
+        arceme_uncorrected_fp(band, ds, timeaxis=:time_sentinel_1_rtc)
+    end
+    fingerprint_sparse_s1 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s1), indexdim_s1), (; band_s1=length(indices_s1)))
+    Dataset(; s2_indices=fingerprint_sparse_s2, s1_indices=fingerprint_sparse_s1, uncorrected_s2_indices=fingerprint_uncor_sparse_s2)
 end
 
 
