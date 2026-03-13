@@ -8,6 +8,7 @@ import ArchGDAL as AG
 using YAXArrays
 using Dates
 using ProgressMeter
+import DataStructures
 
 """
 hrl_set_localpath(path)
@@ -167,7 +168,7 @@ function hrl_download(datasets::Vector{String}, coord::Tuple, yr::Union{String,I
   return fnames
 end
 
-hrl_dict = Dict(
+const hrl_dict = Dict(
     "CTY" => "Crop types",
     "CTYCL" => "Crop types confidence level",
     "CPMCH" => "Main Crop Harvest",
@@ -207,7 +208,7 @@ hrl_dict = Dict(
     "GRAMD4" => "Grassland Mowing Dates of fourth mowing event",
 )
 
-hrl_legends = Dict(
+const hrl_legends = Dict(
     "CTY" => Dict(
         0 =>  "No cropland",
         1110 => "Wheat",
@@ -322,11 +323,11 @@ hrl_legends = Dict(
         64534 No confidence could be calculated.
         65535 Outside area.",
     "CPSCT" => Dict(
+        0 => "No annual cropland", 
         1 => "Short Summer",
         2 => "Long Summer",
         3 => "Short Winter",
         4 => "Long Winter", 
-        0 => "No annual cropland", 
         65526 => "Fallow land", 
         65527 => "No cropping pattern detected",  
         65530 => "No secondary crop growing season delineated",
@@ -493,6 +494,26 @@ function hrl_warp(cubename::String; batch="ARCEME-DC-6", dataset_id::Union{Strin
   fnames = hrl_download(dataset_id, coord, yr)
   hrl_warp(cubename, fnames; batch)
 end
+
+# """
+#      arceme_stats(ds::YAXArrays.Dataset, name; classes=nothing)
+#      arceme_stats(ev::Event, name; batch="ARCEME-DC-6", classes=nothing)
+
+# Get the  statistics of layer `name` for the ARCEME data cube `ds`.
+# Default classes are extracted from `hrl_legends[name]`. Alternative classes can be provided as a dictionary.
+# """
+# function arceme_stats(ds, name; classes=nothing)
+#     if isnothing classes
+#         classes = hrl_legends[name]
+#     end
+#     cdr = DataStructures.counter(ds[name]);
+#     map(collect(classes)) do (k,v)
+#         count=get(cdr, k, 0)
+#         (key=k, class=v, count=count, fraction=count/1000000)
+#     end
+# end
+# arceme_stats(ev::Event, name; batch="ARCEME-DC-6", classes=nothing) = arceme_stats(arceme_open(ev, batch=batch), name; classes = classes)
+
 
 export hrl_download, hrl_set_localpath, hda_datasets, hda_products, hda_years, hrl_warp
 end #module
