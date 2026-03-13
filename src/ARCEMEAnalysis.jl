@@ -42,7 +42,8 @@ lckeymap(k) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
     arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
-    time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db
+    time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
+    arceme_create_indexcubes
 
 """
     _arceme_cubenames(;batch="6")
@@ -411,7 +412,7 @@ function time_aggregate_fingerprint(allbands, eventdate, banddim, timeaxis)
 end
 
 """
-For every valid event pair creates a and stores data cubes of a list of precomputed vegetation indices. For kNDVI 
+For every valid event pair creates and stores a data cubes of a list of precomputed vegetation indices. For kNDVI 
 a shared sigma parameter per land cover class is computed.
 """
 function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])
@@ -442,6 +443,33 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
     end
 end
 
+function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6")
+    if !isdir(joinpath(local_cubepath,"$(batch)-INDICES"))
+        mkdir(joinpath(local_cubepath,"$(batch)-INDICES"))
+    end        
+    output_base = joinpath(local_cubepath,"$(batch)-INDICES")
+
+    for event in event_list
+
+        ds = arceme_open(event, batch = batch)
+
+        arceme_spectral(ds, indices_s1, platform="sentinel1")
+        arceme_spectral(ds, indices_s2, platform="sentinel2")
+        arceme_radar_db(ds)
+        arceme_kndvi(ds)
+
+        fields_to_save = [indices_s1; indices_s2]
+
+        name = arceme_cubename(event)
+        indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
+        compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
+        cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
+        savedataset(cube2, path=joinpath(output_base, name), append=true)
+        run(Cmd(`zip -0 -r ../$(name).zip .`, dir=joinpath(output_base, name)))
+        rm(joinpath(output_base, name), recursive=true)
+        
+    end
+end
 
 using Reexport: @reexport
 
