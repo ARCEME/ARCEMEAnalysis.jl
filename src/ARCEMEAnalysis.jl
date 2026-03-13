@@ -408,7 +408,7 @@ function time_aggregate_fingerprint(allbands, eventdate, banddim, timeaxis)
 end
 
 """
-For every valid event pair creates a and stores data cubes of a list of precomputed vegetation indices. For kNDVI 
+For every valid event pair creates and stores a data cubes of a list of precomputed vegetation indices. For kNDVI 
 a shared sigma parameter per land cover class is computed.
 """
 function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], subset=:)
@@ -465,6 +465,33 @@ function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"],
     Dataset(; s2_indices=fingerprint_sparse_s2, s1_indices=fingerprint_sparse_s1, uncorrected_s2_indices=fingerprint_uncor_sparse_s2)
 end
 
+function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6")
+    if !isdir(joinpath(local_cubepath,"$(batch)-INDICES"))
+        mkdir(joinpath(local_cubepath,"$(batch)-INDICES"))
+    end        
+    output_base = joinpath(local_cubepath,"$(batch)-INDICES")
+
+    for event in event_list
+
+        ds = arceme_open(event, batch = batch)
+
+        arceme_spectral(ds, indices_s1, platform="sentinel1")
+        arceme_spectral(ds, indices_s2, platform="sentinel2")
+        arceme_radar_db(ds)
+        arceme_kndvi(ds)
+
+        fields_to_save = [indices_s1; indices_s2]
+
+        name = arceme_cubename(event)
+        indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
+        compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
+        cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
+        savedataset(cube2, path=joinpath(output_base, name), append=true)
+        run(Cmd(`zip -0 -r ../$(name).zip .`, dir=joinpath(output_base, name)))
+        rm(joinpath(output_base, name), recursive=true)
+        
+    end
+end
 
 using Reexport: @reexport
 
