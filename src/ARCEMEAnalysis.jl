@@ -14,6 +14,15 @@ import Proj
 import SpectralIndices as SI
 import GeoJSON
 
+function __init__()
+    #Extend SpectralIndices band definitions with S1 bands
+    s1vv = Dict{String,SI.PlatformBand}("sentinel1" => SI.PlatformBand("sentinel1", "VV", "Vertical-Vertical", 5.55e7, 1e5))
+    s1vh = Dict{String,SI.PlatformBand}("sentinel1" => SI.PlatformBand("sentinel1", "VH", "Vertical-Horizontal", 5.55e7, 1e5))
+
+    SI.bands["VV"] = SI.Band("VV", "Vertical-Vertical", "vv", 5.54e7, 5.56e7, s1vv)
+    SI.bands["VH"] = SI.Band("VH", "Vertical-Horizontal", "vh", 5.54e7, 5.56e7, s1vh)
+end
+
 const arceme_classes = SortedDict(
     0 => "No data",
     10 => "Tree cover",
@@ -415,14 +424,17 @@ function time_aggregate_fingerprint(allbands, eventdate, banddim, timeaxis)
 end
 
 """
+`arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], subset=:)`
+
 For every valid event pair creates and stores a data cubes of a list of precomputed vegetation indices. For kNDVI 
 a shared sigma parameter per land cover class is computed.
+
 """
-function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], subset=:)
+function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME_DC_6", subset=:)
 
-    for ev in arceme_validpairs()[subset]
+    for ev in arceme_validpairs(batch=batch)[subset]
 
-        ds_pair = arceme_open.(ev, indices=false)
+        ds_pair = arceme_open.(ev, indices=false, batch=batch)
 
         foreach(ds_pair) do ds
             arceme_spectral(ds, indices_s1, platform="sentinel1")
@@ -450,6 +462,44 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
     end
 end
 
+"""
+`arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])`
+
+Computes indices for single events (not pairs) and stores them at `joinpath(local_cubepath,\"\$(batch)-INDICES\")`. 
+"""
+function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6")
+    if !isdir(joinpath(local_cubepath,"$(batch)-INDICES"))
+        mkdir(joinpath(local_cubepath,"$(batch)-INDICES"))
+    end        
+    output_base = joinpath(local_cubepath,"$(batch)-INDICES")
+
+    for event in event_list
+
+        ds = arceme_open(event, batch = batch)
+
+        arceme_spectral(ds, indices_s1, platform="sentinel1")
+        arceme_spectral(ds, indices_s2, platform="sentinel2")
+        arceme_radar_db(ds)
+        arceme_kndvi(ds)
+
+        fields_to_save = [indices_s1; indices_s2] # indices_s2 #
+
+        name = arceme_cubename(event)
+        indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
+        compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
+        cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
+        savedataset(cube2, path=joinpath(output_base, name), append=true)
+        isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
+        run(Cmd(`7z a -tzip -mx=0 ../$(name).zip .`, dir=joinpath(output_base, name)))
+        rm(joinpath(output_base, name), recursive=true)
+        
+    end
+end
+"""
+`arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])`
+
+Computes fingerprints for indices.
+"""
 function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])
 
     #banddim = DD.Dim{:band}(string.(optical_bands))
@@ -494,34 +544,6 @@ function arceme_fractions(ds)
     cloudfrac = sumcl[1, 1, :].data ./ length(ds.x) ./ length(ds.y)
     ds.cubes[:cloud_fraction] = YAXArray((ds.time_sentinel_2_l2a,), cloudfrac)
     ds
-end
-
-function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6")
-    if !isdir(joinpath(local_cubepath,"$(batch)-INDICES"))
-        mkdir(joinpath(local_cubepath,"$(batch)-INDICES"))
-    end        
-    output_base = joinpath(local_cubepath,"$(batch)-INDICES")
-
-    for event in event_list
-
-        ds = arceme_open(event, batch = batch)
-
-        arceme_spectral(ds, indices_s1, platform="sentinel1")
-        arceme_spectral(ds, indices_s2, platform="sentinel2")
-        arceme_radar_db(ds)
-        arceme_kndvi(ds)
-
-        fields_to_save = [indices_s1; indices_s2]
-
-        name = arceme_cubename(event)
-        indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
-        compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
-        cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
-        savedataset(cube2, path=joinpath(output_base, name), append=true)
-        run(Cmd(`zip -0 -r ../$(name).zip .`, dir=joinpath(output_base, name)))
-        rm(joinpath(output_base, name), recursive=true)
-        
-    end
 end
 
 using Reexport: @reexport
