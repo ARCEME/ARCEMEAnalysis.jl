@@ -8,7 +8,7 @@ import ArchGDAL as AG
 using YAXArrays
 using Dates
 using ProgressMeter
-import DataStructures
+using DataStructures: SortedDict, counter
 
 """
 hrl_set_localpath(path)
@@ -209,8 +209,7 @@ const hrl_dict = Dict(
 )
 
 const hrl_legends = Dict(
-    "CTY" => Dict(
-        0 =>  "No cropland",
+    "CTY" => SortedDict(
         1110 => "Wheat",
         1120 => "Barley",
         1130 => "Maize",
@@ -230,6 +229,7 @@ const hrl_legends = Dict(
         2320 => "Nuts",
         3100 => "Unclassified annual crop",
         3200 => "Unclassified permanent crop",
+        0 =>  "No cropland",
         65535 => "outside area"
     ),
     "CTYCL" => "0-100 Probability expressed as a percentage. 253 No Cropland. 255 Outside area",
@@ -322,8 +322,7 @@ const hrl_legends = Dict(
         65533 Growing season extends beyond timeframe. 
         64534 No confidence could be calculated.
         65535 Outside area.",
-    "CPSCT" => Dict(
-        0 => "No annual cropland", 
+    "CPSCT" => SortedDict(
         1 => "Short Summer",
         2 => "Long Summer",
         3 => "Short Winter",
@@ -334,6 +333,7 @@ const hrl_legends = Dict(
         65531 => "Not enough data", 
         65532 => "No cropping season detected",  
         65533 => "Growing season extends beyond timeframe",
+        0 => "No annual cropland", 
         65535 => "Outside area"
     ),
     "CPSCE" => "Emergence date as YYDOY where YY = last 2 digits of the year (e.g., 19 for 2019) and DOY is the day of the year (1-366). 
@@ -364,16 +364,16 @@ const hrl_legends = Dict(
         65533 Growing season extends beyond timeframe. 
         64534 No confidence could be calculated.
         65535 Outside area.",
-    "CPFLP" => Dict(
+    "CPFLP" => SortedDict(
         1 => "Fallow land",
-        0 => "No annual cropland",
+        0 => "No fallow land",
         65535 => "Outside area"
     ),
     "CPFLPCL" => "0-100 Probability expressed as a percentage. 253 No Cropland. 65535 Outside area",
-    "CPCSY" => Dict(
+    "CPCSY" => SortedDict(
+        0 => "No annual cropland", 
         1 => "One growing season",
         2 => "Two growing seasons",
-        0 => "No annual cropland", 
         65526 => "Fallow land", 
         65527 => "No cropping pattern detected",  
         65531 => "Not enough data", 
@@ -382,7 +382,7 @@ const hrl_legends = Dict(
         65535 => "Outside area"
     ),
     # Forest
-    "DLT" => Dict(
+    "DLT" => SortedDict(
         0 => "all non-tree covered areas",
         1 => "broadleaved trees",
         2 => "coniferous trees",
@@ -398,13 +398,13 @@ const hrl_legends = Dict(
             253: all non-tree covered areas
             255: outside area",
     # Grassland
-    "GRA" => Dict(
+    "GRA" => SortedDict(
         0 => "all non-grassland areas",
         1 => "grassland", 
         255 => "outside area",
     ),
     "GRACL" => "0-100: Classification confidence. 253: All non-grassland areas. 255: outside area",
-    "HER" => Dict(
+    "HER" => SortedDict(
         0 => "non-grassland in reference year",
         1 => "temporary grassland in reference year",
         255 => "outside area",
@@ -414,9 +414,12 @@ const hrl_legends = Dict(
     100: Change in herbaceous cover. 
     253: no ploughing information. 
     255: outside area",
-    "GRAME"  => Dict(
+    "GRAME"  => SortedDict(
         0 => "no mowing detected", 
-        1-4 => "Number of mowing events detected",
+        1 => "1 mowing event detected",
+        2 => "2 mowing events",
+        3 => "3 mowing events",
+        4 => "4 mowing events",
         253 => "all non-herbaceous areas",
         255 => "outside area"
     ),
@@ -495,25 +498,39 @@ function hrl_warp(cubename::String; batch="ARCEME-DC-6", dataset_id::Union{Strin
   hrl_warp(cubename, fnames; batch)
 end
 
-# """
-#      arceme_stats(ds::YAXArrays.Dataset, name; classes=nothing)
-#      arceme_stats(ev::Event, name; batch="ARCEME-DC-6", classes=nothing)
+"""
+     arceme_stats(ds::YAXArrays.Dataset, name; classes=nothing)
+     arceme_stats(ev::Event, name; batch="ARCEME-DC-6", classes=nothing)
 
-# Get the  statistics of layer `name` for the ARCEME data cube `ds`.
-# Default classes are extracted from `hrl_legends[name]`. Alternative classes can be provided as a dictionary.
-# """
-# function arceme_stats(ds, name; classes=nothing)
-#     if isnothing classes
-#         classes = hrl_legends[name]
-#     end
-#     cdr = DataStructures.counter(ds[name]);
-#     map(collect(classes)) do (k,v)
-#         count=get(cdr, k, 0)
-#         (key=k, class=v, count=count, fraction=count/1000000)
-#     end
-# end
-# arceme_stats(ev::Event, name; batch="ARCEME-DC-6", classes=nothing) = arceme_stats(arceme_open(ev, batch=batch), name; classes = classes)
+Get the  statistics of layer `name` for the ARCEME data cube `ds`.
+Default classes are extracted from `hrl_legends[name]`. Alternative classes can be provided as a dictionary.
+"""
+function arceme_stats(ds, name; classes=nothing)
+    if isnothing(classes)
+        classes = hrl_legends[name]
+    end
+    cdr = counter(ds[name]);
+    map(collect(classes)) do (k,v)
+        count=get(cdr, k, 0)
+        (key=k, class=v, count=count, fraction=count/1000000)
+    end
+end
+arceme_stats(ev::ARCEMEAnalysis.Event, name; batch="ARCEME-DC-6", classes=nothing) = arceme_stats(arceme_open(ev, batch=batch), name; classes = classes)
 
+function ctykeymap(k)
+    k == 0 && return 1
+    k > 3000 && return 1
+    ctL1 = k ÷ 1000
+    ctL2 = (k - 1000*ctL1) ÷ 100
+    ctL3 = (k - 1000*ctL1 - 100*ctL2) ÷ 10
+    ctL1==1 && ctL2==1 && return ctL3+1
+    ctL1==1 && ctL2==2 && return ctL3+6
+    ctL1==1 && ctL2==3 && return ctL3+8
+    ctL1==1 && ctL2==4 && return ctL3+10
+    ctL1==2 && ctL2==1 && return ctL3+15
+    ctL1==2 && ctL2==2 && return ctL3+15
+    ctL1==2 && ctL2==3 && return ctL3+16
+end
 
-export hrl_download, hrl_set_localpath, hda_datasets, hda_products, hda_years, hrl_warp
+export hrl_download, hrl_set_localpath, hda_datasets, hda_products, hda_years, hrl_warp, arceme_stats
 end #module

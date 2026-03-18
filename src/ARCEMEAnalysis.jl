@@ -37,13 +37,18 @@ const arceme_classes = SortedDict(
   95  => "Mangroves",
   100 => "Moss and lichen",
 )
-lckeymap(k) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
+lckeymap(k::Any) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
+function lckeymap(ds::Dataset;strata="ESA_LC")
+    if strata == "ESA_LC" && return lckeymap.(ds.ESA_LC[time=1]) end
+    if strata == "CTY" && return HRL.ctykeymap.(ds.CTY) end
+end
+
 
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
     arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
     time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
-    arceme_create_indexcubes
+    arceme_create_indexcubes, arceme_index_fingerprints
 
 """
     _arceme_cubenames(;batch="6")
@@ -155,8 +160,8 @@ function arceme_validpairs(;batch="ARCEME-DC-6")
     allpairs[validpairs]
 end
 
-function arceme_open(event::Event; batch="ARCEME-DC-6", indices=true)
-    arceme_open(arceme_cubename(event); batch=batch, indices=indices)
+function arceme_open(event::Event; batch="ARCEME-DC-6", indices=true, hrl=true)
+    arceme_open(arceme_cubename(event); batch=batch, indices=indices, hrl=true)
 end
 
 """
@@ -175,12 +180,16 @@ arceme_landcover(ev::Event; batch="ARCEME-DC-6") = arceme_landcover(arceme_open(
 
 
 """ 
-    arceme_open(cubename; batch="ARCEME-DC-6")
+    arceme_open(cubename::String; batch="ARCEME-DC-6", indices=true, hrl=true)
+    arceme_open(event::Event; batch="ARCEME-DC-6", indices=true, hrl=true)
 
 Open the specified ARCEME data cube from the local path (if with arceme_set_localpath) or 
-    the httpstore (default "https://s3.waw3-2.cloudferro.com/swift/v1", reset with arceme_set_httpstore).
+    the httpstore (default "https://s3.waw3-2.cloudferro.com/swift/v1", reset with arceme_set_httpstore). 
+If `indices=true` (`hrl=true`), also opens indices (hrl layers) if they exist on the expected path.
+
+See also `arceme_create_indexcubes` and `HRL.hrl_warp`.
 """
-function arceme_open(cubename; batch="ARCEME-DC-6", indices=true)
+function arceme_open(cubename; batch="ARCEME-DC-6", indices=true, hrl=true)
     if local_cubepath === nothing
         open_dataset("$httpstore/$batch/$cubename", force_datetime=true)
     else
@@ -191,7 +200,7 @@ function arceme_open(cubename; batch="ARCEME-DC-6", indices=true)
                 main_ds.cubes[k] = v
             end
         end
-        if isfile(joinpath(local_cubepath, "$batch-HRL", string(cubename, ".zip")))
+        if hrl && isfile(joinpath(local_cubepath, "$batch-HRL", string(cubename, ".zip")))
             hrl_ds = open_dataset(joinpath(local_cubepath, "$batch-HRL", string(cubename, ".zip")))
             for (k, v) in (hrl_ds.cubes)
                 main_ds.cubes[k] = v
@@ -459,8 +468,10 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
     output_base = joinpath(local_cubepath,"$(batch)-INDICES")
 
     for event in event_list
+        name = arceme_cubename(event)
+        isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
 
-        ds = arceme_open(event, batch = batch)
+        ds = arceme_open(event, batch = batch, indices=false, hrl=false)
 
         arceme_spectral(ds, indices_s1, platform="sentinel1")
         arceme_spectral(ds, indices_s2, platform="sentinel2")
@@ -469,12 +480,10 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
 
         fields_to_save = [indices_s1; indices_s2] # indices_s2 #
 
-        name = arceme_cubename(event)
         indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
         compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
         cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
         savedataset(cube2, path=joinpath(output_base, name), append=true)
-        isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
         run(Cmd(`7z a -tzip -mx=0 ../$(name).zip .`, dir=joinpath(output_base, name)))
         rm(joinpath(output_base, name), recursive=true)
         
@@ -485,7 +494,7 @@ end
 
 Computes fingerprints for indices.
 """
-function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])
+function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC")
 
     #banddim = DD.Dim{:band}(string.(optical_bands))
     indices_s2 = filter(i -> in(Symbol(i), keys(ds.cubes)), indices_s2) |> collect
@@ -497,17 +506,18 @@ function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"],
     indexdim_s1 = DD.Dim{:band_s1}(indices_s1)
     #eventdate = arceme_eventdate(ds)
     fp_s2 = @showprogress desc = "S2 fingerprint.." map(indices_s2) do band
-        arceme_bias_corrected_fp(band, ds)
+        arceme_bias_corrected_fp(band, ds, strata=strata)
     end
     fingerprint_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
     fingerprint_uncor_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
     #fingerprints_s2 = time_aggregate_fingerprint(fingerprint_sparse_s2, eventdate, indexdim_s2, :time_sentinel_2_l2a)
 
     fp_s1 = @showprogress desc = "S1 fingerprint.." map(indices_s1) do band
-        arceme_uncorrected_fp(band, ds, timeaxis=:time_sentinel_1_rtc)
+        arceme_uncorrected_fp(band, ds, timeaxis=:time_sentinel_1_rtc, strata=strata)
     end
     fingerprint_sparse_s1 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s1), indexdim_s1), (; band_s1=length(indices_s1)))
-    Dataset(; s2_indices=fingerprint_sparse_s2, s1_indices=fingerprint_sparse_s1, uncorrected_s2_indices=fingerprint_uncor_sparse_s2)
+    
+    Dataset(; s2_indices=fingerprint_sparse_s2, s1_indices=fingerprint_sparse_s1, uncorrected_s2_indices=fingerprint_uncor_sparse_s2, class_fractions=fp_s1[1].class_fractions)
 end
 
 using Reexport: @reexport

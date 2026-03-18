@@ -25,14 +25,19 @@ function bare_matrix(c,timname)
     [sin.(t) cos.(t) fill(1.0,length(t))]
 end
 
+function nstrata(strata)
+    strata=="ESA_LC" && return 12
+    strata == "CTY" && return 18
+end
+
 """
 `arceme_bias_corrected_fp(band, dataset; lccube=lckeymap.(dataset.ESA_LC[time=1]), ncl=12, timeaxis=:time_sentinel_2_l2a)`
 
 Computes a cloud-biased corrected footprint of `dataset[band]` aggregated by stratification class for the 
 provided stratification cube `lccube` (`ncl` classes). 
 """
-function arceme_bias_corrected_fp(band, dataset; lccube=lckeymap.(dataset.ESA_LC[time=1]), ncl=12, timeaxis=:time_sentinel_2_l2a)
-    # lccube = lckeymap.(dataset.ESA_LC[time=1])
+function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC", ncl=nstrata(strata), timeaxis=:time_sentinel_2_l2a)
+    lccube = lckeymap(dataset, strata=strata)
     cloudcube = dataset.cloud_mask
     sclcube = dataset.SCL
     inputcube = dataset[band]
@@ -43,7 +48,7 @@ function arceme_bias_corrected_fp(band, dataset; lccube=lckeymap.(dataset.ESA_LC
     clearsky_expected = xmap(pars ⊘ :param, fitmat ⊘ :param,inplace=false) do p,t
         p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
     end
-    win_clearsky = YAXArrays.windows(clearsky_expected, lccube, expected_groups=1:12)
+    win_clearsky = YAXArrays.windows(clearsky_expected, lccube, expected_groups=1:ncl)
     fp_clearsky_expected = mean.(win_clearsky)[:,1,1,1,:].data
 
     clouded_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, cloudcube, sclcube, inplace=false) do p, t, cl, scl
@@ -63,7 +68,8 @@ function arceme_bias_corrected_fp(band, dataset; lccube=lckeymap.(dataset.ESA_LC
     fp = mean.(win_data)[:,1,1,:].data
 
     newdata = fp[:,:] .+ fp_clearsky_expected[:,:] .- fp_clouded_expected[:,:]
-    classax = DD.Dim{:lc}(collect(values(arceme_classes)))
+
+    classax = DD.Dim{:class}(collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))[1:ncl])
 
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
@@ -82,7 +88,8 @@ end
 Computes a cloud-biased corrected footprint aggregated by stratification class for the 
 provided inputcube, cloud mask and stratification cube (`ncl` classes). 
 """
-function arceme_uncorrected_fp(band, dataset;lccube = lckeymap.(dataset.ESA_LC[time=1]), ncl=12, timeaxis=:time_sentinel_1_rtc)
+function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", ncl=nstrata(strata), timeaxis=:time_sentinel_1_rtc)
+    lccube = lckeymap(dataset, strata=strata)
     inputcube = dataset[band]
     timdim = DD.dims(inputcube,timeaxis)
     
@@ -90,7 +97,7 @@ function arceme_uncorrected_fp(band, dataset;lccube = lckeymap.(dataset.ESA_LC[t
     fp = mean.(win)[:,1,1,:].data
 
     abundance = counter(lccube)
-    classax = DD.Dim{:lc}(collect(values(arceme_classes))[1:end])
+    classax = DD.Dim{:class}(collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))[1:ncl])
 
 
     Dataset(
