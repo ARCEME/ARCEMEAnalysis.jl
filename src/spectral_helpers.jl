@@ -93,7 +93,7 @@ end
 """
 function arceme_kndvi(ds, sigmadata=estimate_sigma_per_lc(ds))
     kndvi = xmap(_kNDVI, ds.cloud_mask, ds.SCL, ds.B08, ds.B04, ds.ESA_LC[time=1], output=XOutput(outtype=Float32), function_args=(sigmadata,), inplace=false)
-    ds.cubes[:kndvi] = kndvi
+    ds.cubes[:kNDVI] = kndvi
 end
 
 
