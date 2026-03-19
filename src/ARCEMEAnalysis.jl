@@ -44,7 +44,8 @@ lckeymap(k) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
     arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
-    time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db
+    time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
+    arceme_open_fingerprint
 
 """
     _arceme_cubenames(;batch="6")
@@ -145,6 +146,11 @@ end
 
 function arceme_open(event::Event; batch="ARCEME-DC-6", indices=true)
     arceme_open(arceme_cubename(event); batch=batch, indices=indices)
+end
+
+function arceme_open_fingerprint(event::Event; batch="ARCEME-DC-6")
+    p = arceme_cubename(event)
+    open_dataset(joinpath(local_cubepath, "$batch-fingerprints.zip"), path=p)
 end
 
 """
@@ -456,4 +462,5 @@ end
 
 include("spatialdebias.jl")
 include("spectral_helpers.jl")
+include("plots/fingerprint_plots.jl")
 end #module
