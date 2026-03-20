@@ -176,4 +176,5 @@ function compute_knots(xgood,ntarget=19)
     end
 end
 
+export fingerprint_plot
 end

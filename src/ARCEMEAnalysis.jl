@@ -48,7 +48,7 @@ export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_ev
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs, 
     arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
     time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
-    arceme_create_indexcubes, arceme_index_fingerprints
+    arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint
 
 """
     _arceme_cubenames(;batch="6")
@@ -495,9 +495,9 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
     end
 end
 """
-`arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])`
+`arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC")`
 
-Computes fingerprints for indices.
+Computes fingerprints for indices, stratified by `strata`.
 """
 function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC")
 
