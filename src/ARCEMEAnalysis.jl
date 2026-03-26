@@ -41,6 +41,7 @@ lckeymap(k::Any) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
 function lckeymap(ds::Dataset;strata="ESA_LC")
     if strata == "ESA_LC" && return lckeymap.(ds.ESA_LC[time=1]) end
     if strata == "CTY" && return HRL.ctykeymap.(ds.CTY) end
+    if strata == "MCTY" && return HRL.mctykeymap.(ds.CTY) end
 end
 
 
@@ -291,7 +292,7 @@ function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2")
     ds
 end
 
-_is_cloud(cl, scl) = (cl > 0 || (scl in (1, 3, 7, 8, 9, 10, 11)))
+_is_cloud(cl, scl) = (cl > 0 || (scl in (0, 1, 3, 7, 8, 9, 10, 11)))
 
 
 

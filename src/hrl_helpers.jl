@@ -209,6 +209,11 @@ const hrl_dict = Dict(
 )
 
 const hrl_legends = Dict(
+    "MCTY" => SortedDict(
+        1 => "No cropland",
+        2 => "Annual crop",
+        3 => "Permanent crop"
+    ),
     "CTY" => SortedDict(
         1110 => "Wheat",
         1120 => "Barley",
@@ -523,14 +528,26 @@ function ctykeymap(k)
     ctL1 = k ÷ 1000
     ctL2 = (k - 1000*ctL1) ÷ 100
     ctL3 = (k - 1000*ctL1 - 100*ctL2) ÷ 10
-    ctL1==1 && ctL2==1 && return ctL3+1
-    ctL1==1 && ctL2==2 && return ctL3+6
-    ctL1==1 && ctL2==3 && return ctL3+8
-    ctL1==1 && ctL2==4 && return ctL3+10
-    ctL1==2 && ctL2==1 && return ctL3+15
-    ctL1==2 && ctL2==2 && return ctL3+15
-    ctL1==2 && ctL2==3 && return ctL3+16
+    ctL1==1 && ctL2==1 && return ctL3+1 # cereals
+    ctL1==1 && ctL2==2 && return ctL3+6 # vegetables and pulses
+    ctL1==1 && ctL2==3 && return ctL3+8 # roots (potato, sugar beet)
+    ctL1==1 && ctL2==4 && return ctL3+10 # oil (sunflower, soy, rapeseed)
+    ctL1==2 && ctL2==1 && return ctL3+15 # fiber (flax, cotton, hemp)
+    ctL1==2 && ctL2==2 && return ctL3+15 # grape, olive
+    ctL1==2 && ctL2==3 && return ctL3+16 # fruit, nuts
 end
 
+function mctykeymap(k)
+    k == 0 && return 1 # non crop
+    k == 65535 && return 1
+    ctL1 = k ÷ 1000
+    ctL2 = (k - 1000*ctL1) ÷ 100
+    ctL3 = (k - 1000*ctL1 - 100*ctL2) ÷ 10
+    ctL1 == 1 && return 2 # annual crops
+    ctL1 == 2 && ctL2 == 1 && return 2 # annual fiber
+    ctL1 == 2 && ctL2  > 1 && return 3 # permanent crop
+    k == 3100 && return 2 # Unclassified annual crop
+    k == 3200 && return 3 # Unclassified permanent crop
+end
 export hrl_download, hrl_set_localpath, hda_datasets, hda_products, hda_years, hrl_warp, arceme_stats
 end #module
