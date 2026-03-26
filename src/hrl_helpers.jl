@@ -533,7 +533,7 @@ function ctykeymap(k)
     ctL1==1 && ctL2==3 && return ctL3+8 # roots (potato, sugar beet)
     ctL1==1 && ctL2==4 && return ctL3+10 # oil (sunflower, soy, rapeseed)
     ctL1==2 && ctL2==1 && return ctL3+15 # fiber (flax, cotton, hemp)
-    ctL1==2 && ctL2==2 && return ctL3+15 # grape, olive
+    ctL1==2 && ctL2==2 && return ctL2+14 # grape, olive
     ctL1==2 && ctL2==3 && return ctL3+16 # fruit, nuts
 end
 
@@ -544,8 +544,8 @@ function mctykeymap(k)
     ctL2 = (k - 1000*ctL1) ÷ 100
     ctL3 = (k - 1000*ctL1 - 100*ctL2) ÷ 10
     ctL1 == 1 && return 2 # annual crops
-    ctL1 == 2 && ctL2 == 1 && return 2 # annual fiber
-    ctL1 == 2 && ctL2  > 1 && return 3 # permanent crop
+    # ctL1 == 2 && ctL2 == 1 && return 2 # annual fiber
+    ctL1 == 2 && return 3 # permanent crop
     k == 3100 && return 2 # Unclassified annual crop
     k == 3200 && return 3 # Unclassified permanent crop
 end
