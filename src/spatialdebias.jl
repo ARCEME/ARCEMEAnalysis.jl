@@ -28,6 +28,7 @@ end
 function nstrata(strata)
     strata=="ESA_LC" && return 12
     strata == "CTY" && return 18
+    strata == "MCTY" && return 3
 end
 
 """
