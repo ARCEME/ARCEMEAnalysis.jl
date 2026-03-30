@@ -49,7 +49,7 @@ export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_ev
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs,
     arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
     time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
-    arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint
+    arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint, arceme_fractions
 
 """
     _arceme_cubenames(;batch="6")
@@ -473,7 +473,7 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
 end
 
 """
-`arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"])`
+`arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6")`
 
 Computes indices for single events (not pairs) and stores them at `joinpath(local_cubepath,\"\$(batch)-INDICES\")`. 
 """
@@ -492,6 +492,7 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
         arceme_spectral(ds, indices_s1, platform="sentinel1")
         arceme_spectral(ds, indices_s2, platform="sentinel2")
         arceme_radar_db(ds)
+        arceme_fractions(ds)
         arceme_kndvi(ds)
 
         fields_to_save = [indices_s1; indices_s2] # indices_s2 #
@@ -536,40 +537,19 @@ function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"],
     Dataset(; s2_indices=fingerprint_sparse_s2, s1_indices=fingerprint_sparse_s1, uncorrected_s2_indices=fingerprint_uncor_sparse_s2, class_fractions=fp_s1[1].class_fractions)
 end
 
-function arceme_fractions(ds)
-    c = counter(ds.ESA_LC.data[:, :, 1])
-    npix = length(ds.ESA_LC)
+function arceme_fractions(ds, strata="ESA_LC")
+    c = counter(ds[strata][time=1].data[:, :])
+    npix = length(ds[strata])
     #Find maximum landcover in both cubes
-    classax = DD.Dim{:lc}(collect(values(arceme_classes)))
+    classkeys = collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))
+    classax = DD.Dim{:class}(classkeys)
     fracs = zeros(Float64, length(classax))
-    classkeys = collect(keys(arceme_classes))
     for (k, v) in c
         iclass = findfirst(==(k), classkeys)
         fracs[iclass] = v / npix
     end
-    ds.cubes[:lc_fraction] = YAXArray((classax,), fracs)
-    ds.axes[:lc] = classax
-    sumcl = xmap(ds.cloud_mask ⊘ (:x, :y), ds.SCL ⊘ (:x, :y), inplace=false, output=XOutput(outtype=Float64)) do cl, scl
-        sum(i -> ARCEMEAnalysis._is_cloud(i...), zip(cl, scl))
-    end
-    cloudfrac = sumcl[1, 1, :].data ./ length(ds.x) ./ length(ds.y)
-    ds.cubes[:cloud_fraction] = YAXArray((ds.time_sentinel_2_l2a,), cloudfrac)
-    ds
-end
-
-function arceme_fractions(ds)
-    c = counter(ds.ESA_LC.data[:, :, 1])
-    npix = length(ds.ESA_LC)
-    #Find maximum landcover in both cubes
-    classax = DD.Dim{:lc}(collect(values(arceme_classes)))
-    fracs = zeros(Float64, length(classax))
-    classkeys = collect(keys(arceme_classes))
-    for (k, v) in c
-        iclass = findfirst(==(k), classkeys)
-        fracs[iclass] = v / npix
-    end
-    ds.cubes[:lc_fraction] = YAXArray((classax,), fracs)
-    ds.axes[:lc] = classax
+    ds.cubes[:class_fraction] = YAXArray((classax,), fracs)
+    ds.axes[:class] = classax
     sumcl = xmap(ds.cloud_mask ⊘ (:x, :y), ds.SCL ⊘ (:x, :y), inplace=false, output=XOutput(outtype=Float64)) do cl, scl
         sum(i -> ARCEMEAnalysis._is_cloud(i...), zip(cl, scl))
     end
