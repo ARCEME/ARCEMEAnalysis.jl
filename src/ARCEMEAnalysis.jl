@@ -486,37 +486,6 @@ function arceme_fractions(ds)
     ds
 end
 
-"""
-    arceme_representative_image(ev)
-
-Creates an RGB image highlighting on a cloud-free time step with high NDVI for a certain land cover type 
-"""
-function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, lc=nothing)
-    if lc === nothing
-        lcfrac = ds.lc_fraction.data[:]
-        _, ilc = findmax(lcfrac)
-        lc = ds.lc.val[ilc]
-    end
-    ndvi = ds.s2_indices[band=DD.At(index_use), lc=DD.At(lc)]
-    allndviranks = sortperm(ndvi.data[:], rev=true)
-    repr_ind = 0
-    cloudfrac = ds.cloud_fraction.data[:]
-    for i in 1:length(allndviranks)
-        icandidate = findfirst(==(i), allndviranks)
-        if !ismissing(ndvi[icandidate]) && cloudfrac[icandidate] < 0.05
-            repr_ind = icandidate
-            break
-        end
-    end
-    brfilt(a, factor, alpha) = RGBA(clamp(a.r * factor, 0, 1), clamp(a.g * factor, 0, 1), clamp(a.b * factor, 0, 1), alpha)
-    ilc = findfirst(==(lc), collect(values(arceme_classes)))
-    r = broadcast(arceme_rgb(ds)[time_sentinel_2_l2a=repr_ind], ds.ESA_LC[:, :, 1], brighten_factor) do col, lc, f
-        lcv = ARCEMEAnalysis.lckeymap(lc)
-        alpha = lcv == ilc ? 1.0 : 0.5
-        brfilt(col, f, alpha)
-    end
-    r[:, :]
-end
 
 
 include("spatialdebias.jl")

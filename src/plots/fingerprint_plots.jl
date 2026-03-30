@@ -5,7 +5,7 @@ using Dierckx
 using YAXArrays
 using Dates
 using ..ARCEMEAnalysis
-using ..ARCEMEAnalysis: local_cubepath, arceme_classes
+using ..ARCEMEAnalysis: local_cubepath, arceme_classes, Event
 using DataStructures: counter, OrderedDict
 using Statistics: mean
 using GeoMakie
@@ -39,16 +39,14 @@ pairnow = arceme_validpairs()[4]
 
 
 function most_common_lc(pairnow)
-    c1, c2 = map(pairnow) do ev
-        ds = arceme_open(ev)
-        counter(ds.ESA_LC.data[:, :, 1])
-    end
+    ds1, ds2 = arceme_open.(pairnow)
     #Find maximum landcover in both cubes
-    (_, i1), (_, i2) = findmax.((c1, c2))
-    if c1[i1] + c2[i1] > c1[i2] + c2[i2]
-        arceme_classes[i1]
+    lcfrac1, lcfrac2 = (ds1.lc_fraction[:], ds2.lc_fraction[:])
+    (_, i1), (_, i2) = findmax.((lcfrac1, lcfrac2))
+    if lcfrac1[i1] * lcfrac2[i1] > lcfrac1[i2] * lcfrac2[i2]
+        ds1.lc.val[i1]
     else
-        arceme_classes[i2]
+        ds1.lc.val[i2]
     end
 end
 
@@ -64,7 +62,7 @@ end
 
 function open_plot_data(ev, lc)
     @info "Opening $ev"
-    ds = arceme_open_fingerprint(ev)
+    ds = arceme_open(ev)
     firstday = arceme_eventdate(ev) - Year(1)
     lastday = arceme_eventdate(ev) + Year(1)
     nms = Millisecond(lastday - firstday).value
@@ -93,11 +91,19 @@ function open_plot_data(ev, lc)
         dataplots[band] = pairwise_without_missings(x_s1, s1[band_s1=DD.At(band)].data[:])
     end
 
-    (dataplots, interplots)
+    lcfracs = ds.lc_fraction.data[:]
+    sfracs = sortperm(lcfracs, rev=true)
+    strs = map(sfracs[1:3]) do ifrac
+        string(collect(values(arceme_classes))[ifrac], " => ", round(lcfracs[ifrac] * 100), "%")
+    end
+    lcdesc = join(strs, ", ")
+
+
+    (dataplots, interplots, lcdesc)
 end
 
 
-function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict())
+function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=true)
 
     ipair = Observable{Int}(pairid)
     alleventpairs = arceme_validpairs()
@@ -124,8 +130,8 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict())
 
     for (i_d, o) in enumerate((d, dhp))
         colcur = (:red, :blue)[i_d]
-        dataplots = lift(first, o)
-        interplots = lift(last, o)
+        dataplots = lift(i -> i[1], o)
+        interplots = lift(i -> i[2], o)
         i_pl = 1
         for index_choos in allbands
             ax = Axis(fig[i_pl, i_d], title=index_choos)
@@ -143,12 +149,12 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict())
     for ipl in 1:npl
         linkyaxes!(allax[(ipl, 1)], allax[(ipl, 2)])
     end
-    ax = Axis(fig[5:6, 3], aspect=DataAspect(), title="Drought")
+    ov1 = Axis(fig[5:6, 3], aspect=DataAspect(), title="Drought")
     img1 = lift((y, i) -> arceme_representative_image(alleventpairs[i][1], lc=y), lc_choos, ipair)
-    heatmap!(ax, img1)
-    ax = Axis(fig[7:8, 3], aspect=DataAspect(), title="Drought + HP")
+    heatmap!(ov1, img1)
+    ov2 = Axis(fig[7:8, 3], aspect=DataAspect(), title="Drought + HP")
     img2 = lift((y, i) -> arceme_representative_image(alleventpairs[i][2], lc=y), lc_choos, ipair)
-    heatmap!(ax, img2)
+    heatmap!(ov2, img2)
 
 
     xpos = lift(i -> [alleventpairs[i][1].longitude, alleventpairs[i][2].longitude], ipair)
@@ -157,23 +163,72 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict())
     gax = GeoAxis(fig[3:4, 3], source="+proj=longlat", dest="+proj=longlat")
     heatmap!(gax, img; interpolate=false)
     scatter!(gax, xpos, ypos, color=[:red, :blue])
+
     # xlims!(gax, lift(xpos -> minimum(xpos) - 20, xpos), lift(xpos -> maximum(xpos) + 20, xpos))
     # ylims!(gax, lift(ypos -> minimum(ypos) - 20, ypos), lift(ypos -> maximum(ypos) + 20, ypos))
-    menupair = Slider(fig, range=1:length(alleventpairs), startvalue=40, update_while_dragging=false)
-    menulc = Menu(fig, options=collect(values(arceme_classes)), default=lc)
-    fig[1:2, 3] = vgrid!(
-        Label(fig, "Event Pair", width=nothing),
-        menupair,
-        Label(fig, "Land Cover", width=nothing),
-        menulc,
-    )
-    on(menulc.selection) do s
-        lc_choos[] = s
-    end
-    on(menupair.value) do v
-        ipair[] = v
+    if interactive
+        menupair = Textbox(fig, placeholder=string(ipair[]), validator=Int, tellwidth=false)
+        #menupair = Slider(fig, range=1:length(alleventpairs), startvalue=pairid, update_while_dragging=false)
+        menulc = Menu(fig, options=collect(values(arceme_classes)), default=lc)
+        fig[1:2, 3] = vgrid!(
+            menupair,
+            Label(fig, lift(i -> i[3], d), color=:red),
+            Label(fig, lift(i -> i[3], dhp), color=:blue),
+            menulc,
+
+        )
+        on(menulc.selection) do s
+            lc_choos[] = s
+        end
+        on(menupair.stored_string) do v
+            ipair[] = parse(Int, v)
+            for ipl in 1:npl
+                autolimits!(allax[(ipl, 1)])
+            end
+            autolimits!(ov1)
+            autolimits!(ov2)
+        end
     end
     fig
+end
+
+
+arceme_representative_image(ev::Event; index_use="NDVI", brighten_factor=2, lc=nothing) =
+    arceme_representative_image(arceme_open(ev); index_use, brighten_factor, lc)
+
+"""
+    arceme_representative_image(ev)
+
+Creates an RGB image highlighting on a cloud-free time step with high NDVI for a certain land cover type 
+"""
+function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, lc=nothing)
+    if lc === nothing
+        lcfrac = ds.lc_fraction.data[:]
+        _, ilc = findmax(lcfrac)
+        lc = ds.lc.val[ilc]
+    end
+    ndvi = ds.s2_indices[band=DD.At(index_use), lc=DD.At(lc)]
+    allndviranks = sortperm(ndvi.data[:], rev=true)
+    repr_ind = 0
+    cloudfrac = ds.cloud_fraction.data[:]
+    for i in 1:length(allndviranks)
+        icandidate = findfirst(==(i), allndviranks)
+        if !ismissing(ndvi[icandidate]) && cloudfrac[icandidate] < 0.05
+            repr_ind = icandidate
+            break
+        end
+    end
+    if repr_ind == 0
+        return YAXArray((ds.x, ds.y), fill(RGBA(0.0, 0.0, 0.0, 1.0), 1000, 1000), Dict{Any,Any}())
+    end
+    brfilt(a, factor, alpha) = RGBA(clamp(a.r * factor, 0, 1), clamp(a.g * factor, 0, 1), clamp(a.b * factor, 0, 1), alpha)
+    ilc = findfirst(==(lc), collect(values(arceme_classes)))
+    r = broadcast(arceme_rgb(ds)[time_sentinel_2_l2a=repr_ind], ds.ESA_LC[:, :, 1], brighten_factor) do col, lc, f
+        lcv = ARCEMEAnalysis.lckeymap(lc)
+        alpha = lcv == ilc ? 1.0 : 0.5
+        brfilt(col, f, alpha)
+    end
+    r[:, :]
 end
 
 function compute_knots(xgood, ntarget=19)
