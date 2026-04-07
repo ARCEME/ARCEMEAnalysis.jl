@@ -31,6 +31,15 @@ function nstrata(strata)
     strata == "MCTY" && return length(HRL.hrl_legends["MCTY"])
 end
 
+function classaxis(strata, ncl)
+    if strata == "ESA_LC"
+        DD.Dim{:class}(collect(values(arceme_classes))[1:ncl])
+    else
+        DD.Dim{:class}(collect(values(HRL.hrl_legends[strata]))[1:ncl])
+    end
+end
+
+
 """
 `arceme_bias_corrected_fp(band, dataset; lccube=lckeymap.(dataset.ESA_LC[time=1]), ncl=12, timeaxis=:time_sentinel_2_l2a)`
 
@@ -71,7 +80,7 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
 
     newdata = fp[:,:] .+ fp_clearsky_expected[:,:] .- fp_clouded_expected[:,:]
 
-    classax = DD.Dim{:class}(collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))[1:ncl])
+    classax = classaxis(strata, ncl)
 
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
@@ -100,7 +109,7 @@ function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_se
     fp = mean.(win)[:,1,1,:].data
 
     abundance = counter(lccube)
-    classax = DD.Dim{:class}(collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))[1:ncl])
+    classax = classaxis(strata, ncl)
 
 
     Dataset(

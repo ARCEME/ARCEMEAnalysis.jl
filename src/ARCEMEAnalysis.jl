@@ -440,10 +440,9 @@ For every valid event pair creates and stores a data cubes of a list of precompu
 a shared sigma parameter per land cover class is computed.
 
 """
-function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME_DC_6", subset=:)
+function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6", subset=:)
 
     for ev in arceme_validpairs(batch=batch)[subset]
-
         ds_pair = arceme_open.(ev, indices=false, batch=batch)
 
         foreach(ds_pair) do ds
@@ -463,7 +462,7 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
             compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
             cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
             savedataset(cube2, path=joinpath(output_base, name), append=true)
-            cube3 = ds[["cloud_fraction", "lc_fraction"]]
+            cube3 = ds[["cloud_fraction", "class_fraction"]]
             savedataset(cube3, path=joinpath(output_base, name), append=true)
             isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
             run(Cmd(`7z a -tzip -mx=0 ../$(name).zip .`, dir=joinpath(output_base, name)))
@@ -541,8 +540,12 @@ function arceme_fractions(ds, strata="ESA_LC")
     c = counter(ds[strata][time=1].data[:, :])
     npix = length(ds[strata])
     #Find maximum landcover in both cubes
-    classkeys = collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))
-    classax = DD.Dim{:class}(classkeys)
+    classkeys, classnames = if strata == "ESA_LC"
+        collect(keys(arceme_classes)), collect(values(arceme_classes))
+    else
+        collect(values(HRL.hrl_legends[strata])), collect(values(HRL.hrl_legends[strata]))
+    end
+    classax = DD.Dim{:class}(classnames)
     fracs = zeros(Float64, length(classax))
     for (k, v) in c
         iclass = findfirst(==(k), classkeys)
