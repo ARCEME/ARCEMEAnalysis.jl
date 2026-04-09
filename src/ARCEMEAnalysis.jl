@@ -23,7 +23,84 @@ function __init__()
     SI.bands["VH"] = SI.Band("VH", "Vertical-Horizontal", "vh", 5.54e7, 5.56e7, s1vh)
 end
 
-const arceme_classes = SortedDict(
+const arceme_legends = Dict(
+    # Major Main Crop Type
+    "MCTY" => SortedDict(
+        1 => "No cropland",
+        2 => "Annual crop",
+        3 => "Permanent crop"
+    ),
+    # Main Crop Type
+    "CTY" => SortedDict(
+        0 =>  "No cropland",
+        1110 => "Wheat",
+        1120 => "Barley",
+        1130 => "Maize",
+        1140 => "Rice",
+        1150 => "Other cereals",
+        1210 => "Fresh Vegetables",
+        1220 => "Dry Pulses",
+        1310 => "Potatoes",
+        1320 => "Sugar Beet",
+        1410 => "Sunflower",
+        1420 => "Soybeans",
+        1430 => "Rapeseed",
+        1440 => "Flax cotton and hemp",
+        2100 => "Grapes",
+        2200 => "Olives",
+        2310 => "Fruits",
+        2320 => "Nuts",
+        3100 => "Unclassified annual crop",
+        3200 => "Unclassified permanent crop",
+        65535 => "Outside area"
+    ),
+    # Secondary Crop Type
+    "CPSCT" => SortedDict(
+        0 => "No annual cropland", 
+        1 => "Short Summer",
+        2 => "Long Summer",
+        3 => "Short Winter",
+        4 => "Long Winter", 
+        65526 => "Fallow land", 
+        65527 => "No cropping pattern detected",  
+        65530 => "No secondary crop growing season delineated",
+        65531 => "Not enough data", 
+        65532 => "No cropping season detected",  
+        65533 => "Growing season extends beyond timeframe",
+        65535 => "Outside area"
+    ),
+    # Fallow Land
+    "CPFLP" => SortedDict(
+        0 => "No fallow land",
+        1 => "Fallow land",
+        65535 => "Outside area"
+    ),
+    # Cropping Seasons in Year
+    "CPCSY" => SortedDict(
+        0 => "No annual cropland", 
+        1 => "One growing season",
+        2 => "Two growing seasons",
+        65526 => "Fallow land", 
+        65527 => "No cropping pattern detected",  
+        65531 => "Not enough data", 
+        65532 => "No cropping season detected",  
+        65533 => "Growing season extends beyond timeframe",
+        65535 => "Outside area"
+    ),
+    # Tree cover: Leaf Type
+    "DLT" => SortedDict(
+        0 => "all non-tree covered areas",
+        1 => "broadleaved trees",
+        2 => "coniferous trees",
+        255 => "outside area",
+    ),
+    # Grassland
+    "GRA" => SortedDict(
+        0 => "all non-grassland areas",
+        1 => "grassland", 
+        255 => "outside area",
+    ),
+    "ESA_LC" => SortedDict(
     0 => "No data",
     10 => "Tree cover",
     20 => "Shrubland",
@@ -36,7 +113,9 @@ const arceme_classes = SortedDict(
     90 => "Herbaceous wetland",
     95 => "Mangroves",
     100 => "Moss and lichen",
+    )
 )
+
 lckeymap(k::Any) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
 function lckeymap(ds::Dataset;strata="ESA_LC")
     if strata == "ESA_LC" && return lckeymap.(ds.ESA_LC[time=1]) end
@@ -47,9 +126,10 @@ end
 
 export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
     arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs,
-    arceme_classes, arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
+    arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
     time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
-    arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint, arceme_fractions
+    arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint, arceme_fractions,
+    arceme_legends
 
 """
     _arceme_cubenames(;batch="6")
@@ -178,7 +258,7 @@ Get the land cover statistics for the ARCEME data cube dataset `ds`.
 """
 function arceme_landcover(ds)
     cdr = counter(ds.ESA_LC)
-    map(collect(arceme_classes)) do (k, v)
+    map(collect(arceme_legends["ESA_LC"])) do (k, v)
         count = get(cdr, k, 0)
         (key=k, class=v, count=count, fraction=count / 1000000)
     end
@@ -440,10 +520,9 @@ For every valid event pair creates and stores a data cubes of a list of precompu
 a shared sigma parameter per land cover class is computed.
 
 """
-function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME_DC_6", subset=:)
+function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6", subset=:)
 
     for ev in arceme_validpairs(batch=batch)[subset]
-
         ds_pair = arceme_open.(ev, indices=false, batch=batch)
 
         foreach(ds_pair) do ds
@@ -456,20 +535,25 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
 
         fields_to_save = [indices_s1; indices_s2]
 
+        output_base = "$local_cubepath/$(batch)-INDICES"
+
         foreach(ds_pair, ev) do ds, event
-            output_base = "$local_cubepath/ARCEME-DC-6-INDICES"
-            name = arceme_cubename(event)
-            indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
-            compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
-            cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
-            savedataset(cube2, path=joinpath(output_base, name), append=true)
-            cube3 = ds[["cloud_fraction", "lc_fraction"]]
-            savedataset(cube3, path=joinpath(output_base, name), append=true)
-            isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
-            run(Cmd(`7z a -tzip -mx=0 ../$(name).zip .`, dir=joinpath(output_base, name)))
-            rm(joinpath(output_base, name), recursive=true)
+            writeindexcubes(ds, event, output_base, fields_to_save)
         end
     end
+end
+
+function writeindexcubes(ds, event, output_base, fields_to_save)
+    name = arceme_cubename(event)
+    indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
+    compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
+    cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
+    savedataset(cube2, path=joinpath(output_base, name), append=true)
+    cube3 = ds[["cloud_fraction", "lc_fraction"]]
+    savedataset(cube3, path=joinpath(output_base, name), append=true)
+    isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
+    run(Cmd(`7z a -tzip -mx=0 ../$(name).zip .`, dir=joinpath(output_base, name)))
+    rm(joinpath(output_base, name), recursive=true)
 end
 
 """
@@ -497,13 +581,8 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
 
         fields_to_save = [indices_s1; indices_s2] # indices_s2 #
 
-        indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
-        compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
-        cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
-        savedataset(cube2, path=joinpath(output_base, name), append=true)
-        run(Cmd(`7z a -tzip -mx=0 ../$(name).zip .`, dir=joinpath(output_base, name)))
-        rm(joinpath(output_base, name), recursive=true)
-        
+        writeindexcubes(ds, event, output_base, fields_to_save)
+
     end
 end
 """
@@ -537,19 +616,19 @@ function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"],
     Dataset(; s2_indices=fingerprint_sparse_s2, s1_indices=fingerprint_sparse_s1, uncorrected_s2_indices=fingerprint_uncor_sparse_s2, class_fractions=fp_s1[1].class_fractions)
 end
 
-function arceme_fractions(ds, strata="ESA_LC")
-    c = counter(ds[strata][time=1].data[:, :])
-    npix = length(ds[strata])
+function arceme_fractions(ds)
+    c = counter(ds.ESA_LC[time=1].data[:, :])
+    npix = length(ds.ESA_LC)
     #Find maximum landcover in both cubes
-    classkeys = collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))
-    classax = DD.Dim{:class}(classkeys)
+    classkeys, classnames = collect(keys(arceme_legends["ESA_LC"])), collect(values(arceme_legends["ESA_LC"]))
+    classax = DD.Dim{:lc}(classnames)
     fracs = zeros(Float64, length(classax))
     for (k, v) in c
         iclass = findfirst(==(k), classkeys)
         fracs[iclass] = v / npix
     end
-    ds.cubes[:class_fraction] = YAXArray((classax,), fracs)
-    ds.axes[:class] = classax
+    ds.cubes[:lc_fraction] = YAXArray((classax,), fracs)
+    ds.axes[:lc] = classax
     sumcl = xmap(ds.cloud_mask ⊘ (:x, :y), ds.SCL ⊘ (:x, :y), inplace=false, output=XOutput(outtype=Float64)) do cl, scl
         sum(i -> ARCEMEAnalysis._is_cloud(i...), zip(cl, scl))
     end

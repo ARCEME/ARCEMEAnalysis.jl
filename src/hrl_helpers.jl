@@ -215,6 +215,7 @@ const hrl_legends = Dict(
         3 => "Permanent crop"
     ),
     "CTY" => SortedDict(
+        0 =>  "No cropland",
         1110 => "Wheat",
         1120 => "Barley",
         1130 => "Maize",
@@ -234,7 +235,6 @@ const hrl_legends = Dict(
         2320 => "Nuts",
         3100 => "Unclassified annual crop",
         3200 => "Unclassified permanent crop",
-        0 =>  "No cropland",
         65535 => "outside area"
     ),
     "CTYCL" => "0-100 Probability expressed as a percentage. 253 No Cropland. 255 Outside area",
@@ -328,6 +328,7 @@ const hrl_legends = Dict(
         64534 No confidence could be calculated.
         65535 Outside area.",
     "CPSCT" => SortedDict(
+        0 => "No annual cropland", 
         1 => "Short Summer",
         2 => "Long Summer",
         3 => "Short Winter",
@@ -338,7 +339,6 @@ const hrl_legends = Dict(
         65531 => "Not enough data", 
         65532 => "No cropping season detected",  
         65533 => "Growing season extends beyond timeframe",
-        0 => "No annual cropland", 
         65535 => "Outside area"
     ),
     "CPSCE" => "Emergence date as YYDOY where YY = last 2 digits of the year (e.g., 19 for 2019) and DOY is the day of the year (1-366). 
@@ -370,8 +370,8 @@ const hrl_legends = Dict(
         64534 No confidence could be calculated.
         65535 Outside area.",
     "CPFLP" => SortedDict(
-        1 => "Fallow land",
         0 => "No fallow land",
+        1 => "Fallow land",
         65535 => "Outside area"
     ),
     "CPFLPCL" => "0-100 Probability expressed as a percentage. 253 No Cropland. 65535 Outside area",

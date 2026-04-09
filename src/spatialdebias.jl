@@ -26,19 +26,22 @@ function bare_matrix(c,timname)
 end
 
 function nstrata(strata)
-    strata=="ESA_LC" && return length(arceme_classes)
     strata == "CTY" && return 18
-    strata == "MCTY" && return length(HRL.hrl_legends["MCTY"])
+    return length(arceme_legends[strata])
 end
 
-"""
-`arceme_bias_corrected_fp(band, dataset; lccube=lckeymap.(dataset.ESA_LC[time=1]), ncl=12, timeaxis=:time_sentinel_2_l2a)`
+function classaxis(strata, ncl)
+    DD.Dim{:class}(collect(values(arceme_legends[strata]))[1:ncl])
+end
 
-Computes a cloud-biased corrected footprint of `dataset[band]` aggregated by stratification class for the 
-provided stratification cube `lccube` (`ncl` classes). 
+
+"""
+`arceme_bias_corrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_sentinel_2_l2a)`
+
+Computes a cloud-biased corrected footprint of `dataset[band]` aggregated by stratification band `strata`. 
 """
 function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC", timeaxis=:time_sentinel_2_l2a)
-    ncl=nstrata(strata)
+    ncl = nstrata(strata)
     lccube = lckeymap(dataset, strata=strata)
     cloudcube = dataset.cloud_mask
     sclcube = dataset.SCL
@@ -71,7 +74,7 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
 
     newdata = fp[:,:] .+ fp_clearsky_expected[:,:] .- fp_clouded_expected[:,:]
 
-    classax = DD.Dim{:class}(collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))[1:ncl])
+    classax = classaxis(strata, ncl)
 
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
@@ -85,13 +88,12 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
 end
 
 """
-`arceme_uncorrected_fp(band, dataset; strata="ESA_LC", ncl=nstrata(strata), timeaxis=:time_sentinel_1_rtc)`
+`arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_sentinel_1_rtc)`
 
-Computes a cloud-biased corrected footprint aggregated by stratification class for the 
-provided inputcube, cloud mask and stratification cube (`ncl` classes). 
+Computes the footprint of `dataset[band]` aggregated by stratification classes in band `strata`. 
 """
 function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_sentinel_1_rtc)
-    ncl=nstrata(strata)
+    ncl = nstrata(strata)
     lccube = lckeymap(dataset, strata=strata)
     inputcube = dataset[band]
     timdim = DD.dims(inputcube,timeaxis)
@@ -100,7 +102,7 @@ function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_se
     fp = mean.(win)[:,1,1,:].data
 
     abundance = counter(lccube)
-    classax = DD.Dim{:class}(collect(values(ifelse(strata=="ESA_LC", arceme_classes, HRL.hrl_legends[strata])))[1:ncl])
+    classax = classaxis(strata, ncl)
 
 
     Dataset(
