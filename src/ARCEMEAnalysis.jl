@@ -249,7 +249,7 @@ function arceme_open_fingerprint(event::Event; batch="ARCEME-DC-6")
     arceme_open_fingerprint(arceme_cubename(event); batch)
 end
 
-arceme_open_fingerprint(cubename; batch="ARCEME-DC-6") = open_dataset(joinpath(local_cubepath, "$batch-fingerprints.zip"), path=cubename)
+arceme_open_fingerprint(cubename; batch="ARCEME-DC-6") = open_dataset(joinpath(local_cubepath, "$batch-fingerprints.zip"), path=cubename, force_datetime=true)
 
 """
      arceme_landcover(ds)
@@ -280,9 +280,9 @@ function arceme_open(cubename; batch="ARCEME-DC-6", indices=true, trylocal=true,
     if local_cubepath === nothing || !trylocal
         open_dataset("$httpstore/$batch/$cubename", force_datetime=true)
     else
-        main_ds = open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")))
+        main_ds = open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")), force_datetime=true)
         if indices && isfile(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
-            index_ds = open_dataset(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
+            index_ds = open_dataset(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")), force_datetime=true)
             for (k, v) in (index_ds.cubes)
                 main_ds.cubes[k] = v
             end
