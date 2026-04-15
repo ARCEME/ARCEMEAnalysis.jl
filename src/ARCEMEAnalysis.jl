@@ -115,12 +115,14 @@ const arceme_legends = Dict(
     100 => "Moss and lichen",
     )
 )
-
-lckeymap(k::Any) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
-function lckeymap(ds::Dataset;strata="ESA_LC")
-    if strata == "ESA_LC" && return lckeymap.(ds.ESA_LC[time=1]) end
-    if strata == "CTY" && return HRL.ctykeymap.(ds.CTY) end
-    if strata == "MCTY" && return HRL.mctykeymap.(ds.CTY) end
+lckeymap(k) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
+function lckeymap(ds::Dataset; strata="ESA_LC")
+    if strata == "ESA_LC" && return lckeymap.(ds.ESA_LC[time=1])
+    end
+    if strata == "CTY" && return HRL.ctykeymap.(ds.CTY)
+    end
+    if strata == "MCTY" && return HRL.mctykeymap.(ds.CTY)
+    end
 end
 
 
@@ -180,7 +182,7 @@ end
 
 Get a list of ARCEME events from the local CSV or geojson file.
 """
-function arceme_eventlist(;csv=joinpath(@__DIR__, "..","data","dhp_global_subselection.csv"))
+function arceme_eventlist(; csv=joinpath(@__DIR__, "..", "data", "dhp_global_subselection.csv"))
     map(CSV.File(csv)) do row
         Event(
             row.uid,
@@ -200,7 +202,7 @@ function arceme_eventlist(;csv=joinpath(@__DIR__, "..","data","dhp_global_subsel
     end
 end
 
-function arceme_eventlist(source::String; geojson=joinpath(@__DIR__, "..","data/selection_eu_wocat_dhp_qdoy_hrl.geojson")) 
+function arceme_eventlist(source::String; geojson=joinpath(@__DIR__, "..", "data/selection_eu_wocat_dhp_qdoy_hrl.geojson"))
     map(GeoJSON.read(geojson)) do row
         Event(
             row.uid,
@@ -208,14 +210,12 @@ function arceme_eventlist(source::String; geojson=joinpath(@__DIR__, "..","data/
             row.geometry[1],
             row.geometry[2],
             DateTime(row.startdate),
-            Symbol(source),
-
-        )
+            Symbol(source),)
     end
 end
 
-arceme_cubename(event::Event) = 
-"DC__$(event.uid)__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
+arceme_cubename(event::Event) =
+    "DC__$(event.uid)__$(Date(arceme_starttime(event)))__$(Date(arceme_endtime(event))).zarr"
 
 """
     arceme_eventpairs()
@@ -223,7 +223,7 @@ arceme_cubename(event::Event) =
 Get pairs of ARCEME events from the event list.
 """
 arceme_eventpairs() =
-    Iterators.partition(sort(arceme_eventlist(),by=i->(i.event_label,i.source)),2) |> collect
+    Iterators.partition(sort(arceme_eventlist(), by=i -> (i.event_label, i.source)), 2) |> collect
 
 """
     arceme_validpairs(;batch="ARCEME-DC-6")
@@ -562,16 +562,16 @@ end
 Computes indices for single events (not pairs) and stores them at `joinpath(local_cubepath,\"\$(batch)-INDICES\")`. 
 """
 function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6")
-    if !isdir(joinpath(local_cubepath,"$(batch)-INDICES"))
-        mkdir(joinpath(local_cubepath,"$(batch)-INDICES"))
-    end        
-    output_base = joinpath(local_cubepath,"$(batch)-INDICES")
+    if !isdir(joinpath(local_cubepath, "$(batch)-INDICES"))
+        mkdir(joinpath(local_cubepath, "$(batch)-INDICES"))
+    end
+    output_base = joinpath(local_cubepath, "$(batch)-INDICES")
 
     for event in event_list
         name = arceme_cubename(event)
         isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
 
-        ds = arceme_open(event, batch = batch, indices=false, hrl=false)
+        ds = arceme_open(event, batch=batch, indices=false, hrl=false)
 
         arceme_spectral(ds, indices_s1, platform="sentinel1")
         arceme_spectral(ds, indices_s2, platform="sentinel2")
