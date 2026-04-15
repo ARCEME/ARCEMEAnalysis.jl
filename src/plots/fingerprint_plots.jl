@@ -5,7 +5,7 @@ using Dierckx
 using YAXArrays
 using Dates
 using ..ARCEMEAnalysis
-using ..ARCEMEAnalysis: local_cubepath, arceme_classes, Event
+using ..ARCEMEAnalysis: local_cubepath, arceme_legends, Event
 using DataStructures: counter, OrderedDict
 using Statistics: mean
 using GeoMakie
@@ -60,7 +60,7 @@ function pairwise_without_missings(x, y)
     out
 end
 
-function open_plot_data(ev, class)
+function open_plot_data(ev, class; strata="ESA_LC")
     @info "Opening $ev"
     ds = arceme_open(ev)
     firstday = arceme_eventdate(ev) - Year(1)
@@ -94,7 +94,7 @@ function open_plot_data(ev, class)
     classfracs = ds.class_fraction.data[:]
     sfracs = sortperm(classfracs, rev=true)
     strs = map(sfracs[1:3]) do ifrac
-        string(collect(values(arceme_classes))[ifrac], " => ", round(classfracs[ifrac] * 100), "%")
+        string(collect(values(arceme_legends[strata]))[ifrac], " => ", round(lcfracs[ifrac] * 100), "%")
     end
     classdesc = join(strs, ", ")
 
@@ -103,7 +103,8 @@ function open_plot_data(ev, class)
 end
 
 
-function fingerprint_plot(pairid=1; class=nothing, plotdict=IdDict(), interactive=true)
+
+function fingerprint_plot(pairid=1; class=nothing, plotdict=IdDict(), interactive=true, strata="ESA_LC")
 
     ipair = Observable{Int}(pairid)
     alleventpairs = arceme_validpairs()
@@ -169,7 +170,8 @@ function fingerprint_plot(pairid=1; class=nothing, plotdict=IdDict(), interactiv
     if interactive
         menupair = Textbox(fig, placeholder=string(ipair[]), validator=Int, tellwidth=false)
         #menupair = Slider(fig, range=1:length(alleventpairs), startvalue=pairid, update_while_dragging=false)
-        menuclass = Menu(fig, options=collect(values(arceme_classes)), default=class)
+
+        menuclass = Menu(fig, options=collect(values(arceme_legends[strata])), default=class)
         fig[1:2, 3] = vgrid!(
             menupair,
             Label(fig, lift(i -> i[3], d), color=:red),
@@ -199,7 +201,8 @@ arceme_representative_image(ev::Event; index_use="NDVI", brighten_factor=2, clas
 
 Creates an RGB image highlighting on a cloud-free time step with high NDVI for a certain land cover type 
 """
-function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, class=nothing)
+
+function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, class=nothing, strata="ESA_LC")
     if class === nothing
         classfrac = ds.class_fraction.data[:]
         _, iclass = findmax(classfrac)
@@ -220,7 +223,7 @@ function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, cl
         return YAXArray((ds.x, ds.y), fill(RGBA(0.0, 0.0, 0.0, 1.0), 1000, 1000), Dict{Any,Any}())
     end
     brfilt(a, factor, alpha) = RGBA(clamp(a.r * factor, 0, 1), clamp(a.g * factor, 0, 1), clamp(a.b * factor, 0, 1), alpha)
-    iclass = findfirst(==(class), collect(values(arceme_classes)))
+    iclass = findfirst(==(class), collect(values(arceme_legends[strata])))
     r = broadcast(arceme_rgb(ds)[time_sentinel_2_l2a=repr_ind], ds.ESA_LC[:, :, 1], brighten_factor) do col, class, f
         classv = ARCEMEAnalysis.lckeymap(class)
         alpha = classv == iclass ? 1.0 : 0.5
