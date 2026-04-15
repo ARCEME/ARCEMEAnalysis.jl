@@ -38,15 +38,15 @@ pairnow = arceme_validpairs()[4]
 
 
 
-function most_common_lc(pairnow)
+function most_common_class(pairnow)
     ds1, ds2 = arceme_open.(pairnow)
     #Find maximum landcover in both cubes
-    lcfrac1, lcfrac2 = (ds1.lc_fraction[:], ds2.lc_fraction[:])
-    (_, i1), (_, i2) = findmax.((lcfrac1, lcfrac2))
-    if lcfrac1[i1] * lcfrac2[i1] > lcfrac1[i2] * lcfrac2[i2]
-        ds1.lc.val[i1]
+    classfrac1, classfrac2 = (ds1.class_fraction[:], ds2.class_fraction[:])
+    (_, i1), (_, i2) = findmax.((classfrac1, classfrac2))
+    if classfrac1[i1] * classfrac2[i1] > classfrac1[i2] * classfrac2[i2]
+        ds1.class.val[i1]
     else
-        ds1.lc.val[i2]
+        ds1.class.val[i2]
     end
 end
 
@@ -60,7 +60,7 @@ function pairwise_without_missings(x, y)
     out
 end
 
-function open_plot_data(ev, lc; strata="ESA_LC")
+function open_plot_data(ev, class; strata="ESA_LC")
     @info "Opening $ev"
     ds = arceme_open(ev)
     firstday = arceme_eventdate(ev) - Year(1)
@@ -71,8 +71,8 @@ function open_plot_data(ev, lc; strata="ESA_LC")
     x_s1 = map(linscal, ds.time_sentinel_1_rtc.val)
     outax = YAXArrays.time(range(firstday, lastday, step=Day(1)))
 
-    s2 = ds.s2_indices[lc=DD.At(lc)]
-    s1 = ds.s1_indices[lc=DD.At(lc)]
+    s2 = ds.s2_indices[class=DD.At(class)]
+    s1 = ds.s1_indices[class=DD.At(class)]
 
     r_s2 = xmap(filter_spline, s2 ⊘ :time_sentinel_2_l2a, output=XOutput(outax), function_args=(x_s2, length(outax),))
     r_s1 = xmap(filter_spline, s1 ⊘ :time_sentinel_1_rtc, output=XOutput(outax), function_args=(x_s1, length(outax),))
@@ -91,36 +91,37 @@ function open_plot_data(ev, lc; strata="ESA_LC")
         dataplots[band] = pairwise_without_missings(x_s1, s1[band_s1=DD.At(band)].data[:])
     end
 
-    lcfracs = ds.lc_fraction.data[:]
-    sfracs = sortperm(lcfracs, rev=true)
+    classfracs = ds.class_fraction.data[:]
+    sfracs = sortperm(classfracs, rev=true)
     strs = map(sfracs[1:3]) do ifrac
         string(collect(values(arceme_legends[strata]))[ifrac], " => ", round(lcfracs[ifrac] * 100), "%")
     end
-    lcdesc = join(strs, ", ")
+    classdesc = join(strs, ", ")
 
 
-    (dataplots, interplots, lcdesc)
+    (dataplots, interplots, classdesc)
 end
 
 
-function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=true, strata="ESA_LC")
+
+function fingerprint_plot(pairid=1; class=nothing, plotdict=IdDict(), interactive=true, strata="ESA_LC")
 
     ipair = Observable{Int}(pairid)
     alleventpairs = arceme_validpairs()
 
-    if lc === nothing
-        lc = most_common_lc(alleventpairs[pairid])
+    if class === nothing
+        class = most_common_class(alleventpairs[pairid])
     end
 
-    lc_choos = Observable{Any}(lc)
+    class_choos = Observable{Any}(class)
 
-    d = lift(ipair, lc_choos) do i, lc
+    d = lift(ipair, class_choos) do i, class
         ev = alleventpairs[i][1]
-        open_plot_data(ev, lc)
+        open_plot_data(ev, class)
     end
-    dhp = lift(ipair, lc_choos) do i, lc
+    dhp = lift(ipair, class_choos) do i, class
         ev = alleventpairs[i][2]
-        open_plot_data(ev, lc)
+        open_plot_data(ev, class)
     end
     fig = Figure(size=(1600, 2600))
 
@@ -150,10 +151,10 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=t
         linkyaxes!(allax[(ipl, 1)], allax[(ipl, 2)])
     end
     ov1 = Axis(fig[5:6, 3], aspect=DataAspect(), title="Drought")
-    img1 = lift((y, i) -> arceme_representative_image(alleventpairs[i][1], lc=y), lc_choos, ipair)
+    img1 = lift((y, i) -> arceme_representative_image(alleventpairs[i][1], class=y), class_choos, ipair)
     heatmap!(ov1, img1)
     ov2 = Axis(fig[7:8, 3], aspect=DataAspect(), title="Drought + HP")
-    img2 = lift((y, i) -> arceme_representative_image(alleventpairs[i][2], lc=y), lc_choos, ipair)
+    img2 = lift((y, i) -> arceme_representative_image(alleventpairs[i][2], class=y), class_choos, ipair)
     heatmap!(ov2, img2)
 
 
@@ -169,16 +170,15 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=t
     if interactive
         menupair = Textbox(fig, placeholder=string(ipair[]), validator=Int, tellwidth=false)
         #menupair = Slider(fig, range=1:length(alleventpairs), startvalue=pairid, update_while_dragging=false)
-        menulc = Menu(fig, options=collect(values(arceme_legends[strata])), default=lc)
+
+        menuclass = Menu(fig, options=collect(values(arceme_legends[strata])), default=class)
         fig[1:2, 3] = vgrid!(
             menupair,
             Label(fig, lift(i -> i[3], d), color=:red),
             Label(fig, lift(i -> i[3], dhp), color=:blue),
-            menulc,
-
-        )
-        on(menulc.selection) do s
-            lc_choos[] = s
+            menuclass,)
+        on(menuclass.selection) do s
+            class_choos[] = s
         end
         on(menupair.stored_string) do v
             ipair[] = parse(Int, v)
@@ -193,21 +193,22 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=t
 end
 
 
-arceme_representative_image(ev::Event; index_use="NDVI", brighten_factor=2, lc=nothing) =
-    arceme_representative_image(arceme_open(ev); index_use, brighten_factor, lc)
+arceme_representative_image(ev::Event; index_use="NDVI", brighten_factor=2, class=nothing) =
+    arceme_representative_image(arceme_open(ev); index_use, brighten_factor, class)
 
 """
     arceme_representative_image(ev)
 
 Creates an RGB image highlighting on a cloud-free time step with high NDVI for a certain land cover type 
 """
-function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, lc=nothing, strata="ESA_LC")
-    if lc === nothing
-        lcfrac = ds.lc_fraction.data[:]
-        _, ilc = findmax(lcfrac)
-        lc = ds.lc.val[ilc]
+
+function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, class=nothing, strata="ESA_LC")
+    if class === nothing
+        classfrac = ds.class_fraction.data[:]
+        _, iclass = findmax(classfrac)
+        class = ds.class.val[iclass]
     end
-    ndvi = ds.s2_indices[band=DD.At(index_use), lc=DD.At(lc)]
+    ndvi = ds.s2_indices[band=DD.At(index_use), class=DD.At(class)]
     allndviranks = sortperm(ndvi.data[:], rev=true)
     repr_ind = 0
     cloudfrac = ds.cloud_fraction.data[:]
@@ -222,10 +223,10 @@ function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, lc
         return YAXArray((ds.x, ds.y), fill(RGBA(0.0, 0.0, 0.0, 1.0), 1000, 1000), Dict{Any,Any}())
     end
     brfilt(a, factor, alpha) = RGBA(clamp(a.r * factor, 0, 1), clamp(a.g * factor, 0, 1), clamp(a.b * factor, 0, 1), alpha)
-    ilc = findfirst(==(lc), collect(values(arceme_legends[strata])))
-    r = broadcast(arceme_rgb(ds)[time_sentinel_2_l2a=repr_ind], ds.ESA_LC[:, :, 1], brighten_factor) do col, lc, f
-        lcv = ARCEMEAnalysis.lckeymap(lc)
-        alpha = lcv == ilc ? 1.0 : 0.5
+    iclass = findfirst(==(class), collect(values(arceme_legends[strata])))
+    r = broadcast(arceme_rgb(ds)[time_sentinel_2_l2a=repr_ind], ds.ESA_LC[:, :, 1], brighten_factor) do col, class, f
+        classv = ARCEMEAnalysis.lckeymap(class)
+        alpha = classv == iclass ? 1.0 : 0.5
         brfilt(col, f, alpha)
     end
     r[:, :]
