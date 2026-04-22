@@ -6,7 +6,7 @@ import DimensionalData as DD
 using Colors: RGB, RGBA
 using Dates: DateTime, Year, Date
 import CSV
-using Statistics: mean
+using Statistics: mean, median
 using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
 using SpectralIndices: compute_index, SpectralIndices
@@ -586,11 +586,11 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
     end
 end
 """
-`arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC")`
+`arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC", fpstat=mean)`
 
-Computes fingerprints for indices, stratified by `strata`.
+Computes fingerprints for indices, stratified by `strata` using statistic `fpstat`.
 """
-function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC")
+function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC", fpstat=mean)
 
     #banddim = DD.Dim{:band}(string.(optical_bands))
     indices_s2 = filter(i -> in(Symbol(i), keys(ds.cubes)), indices_s2) |> collect
@@ -602,14 +602,14 @@ function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"],
     indexdim_s1 = DD.Dim{:band_s1}(indices_s1)
     #eventdate = arceme_eventdate(ds)
     fp_s2 = @showprogress desc = "S2 fingerprint.." map(indices_s2) do band
-        arceme_bias_corrected_fp(band, ds, strata=strata)
+        arceme_bias_corrected_fp(band, ds, strata=strata, fpstat=fpstat)
     end
     fingerprint_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
     fingerprint_uncor_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
     #fingerprints_s2 = time_aggregate_fingerprint(fingerprint_sparse_s2, eventdate, indexdim_s2, :time_sentinel_2_l2a)
 
     fp_s1 = @showprogress desc = "S1 fingerprint.." map(indices_s1) do band
-        arceme_uncorrected_fp(band, ds, timeaxis=:time_sentinel_1_rtc, strata=strata)
+        arceme_uncorrected_fp(band, ds, timeaxis=:time_sentinel_1_rtc, strata=strata, fpstat=fpstat)
     end
     fingerprint_sparse_s1 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s1), indexdim_s1), (; band_s1=length(indices_s1)))
 

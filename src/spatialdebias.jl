@@ -40,7 +40,7 @@ end
 
 Computes a cloud-biased corrected footprint of `dataset[band]` aggregated by stratification band `strata`. 
 """
-function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC", timeaxis=:time_sentinel_2_l2a)
+function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC", timeaxis=:time_sentinel_2_l2a, fpstat=mean)
     ncl = nstrata(strata)
     lccube = lckeymap(dataset, strata=strata)
     cloudcube = dataset.cloud_mask
@@ -54,7 +54,7 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
         p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
     end
     win_clearsky = YAXArrays.windows(clearsky_expected, lccube, expected_groups=1:ncl)
-    fp_clearsky_expected = mean.(win_clearsky)[:,1,1,1,:].data
+    fp_clearsky_expected = fpstat.(win_clearsky)[:,1,1,1,:].data
 
     clouded_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, cloudcube, sclcube, inplace=false) do p, t, cl, scl
         if _is_cloud(cl,scl)
@@ -64,13 +64,13 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
         end
     end
     win_clouded = YAXArrays.windows(clouded_expected, lccube, expected_groups=1:ncl)
-    fp_clouded_expected = mean.(win_clouded)[:,1,1,1,:].data
+    fp_clouded_expected = fpstat.(win_clouded)[:,1,1,1,:].data
 
     inputcube_filtered = xmap(inputcube, cloudcube,sclcube,inplace=false,output=XOutput(outtype=Float32)) do x,cl,scl
         _is_cloud(cl,scl) ? NaN : x
     end
     win_data = YAXArrays.windows(inputcube_filtered, lccube, expected_groups=1:ncl)
-    fp = mean.(win_data)[:,1,1,:].data
+    fp = fpstat.(win_data)[:,1,1,:].data
 
     newdata = fp[:,:] .+ fp_clearsky_expected[:,:] .- fp_clouded_expected[:,:]
 
@@ -92,14 +92,14 @@ end
 
 Computes the footprint of `dataset[band]` aggregated by stratification classes in band `strata`. 
 """
-function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_sentinel_1_rtc)
+function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_sentinel_1_rtc, fpstat=mean)
     ncl = nstrata(strata)
     lccube = lckeymap(dataset, strata=strata)
     inputcube = dataset[band]
     timdim = DD.dims(inputcube,timeaxis)
     
     win = YAXArrays.windows(inputcube, lccube, expected_groups=1:ncl)
-    fp = mean.(win)[:,1,1,:].data
+    fp = fpstat.(win)[:,1,1,:].data
 
     abundance = counter(lccube)
     classax = classaxis(strata, ncl)
