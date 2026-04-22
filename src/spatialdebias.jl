@@ -1,29 +1,29 @@
 export arceme_bias_corrected_fp, arceme_uncorrected_fp
 
-function sincosparams(c,timname = :time_sentinel_2_l2a)
-    fitmat = bare_matrix(c,timname)
+function sincosparams(c, timname=:time_sentinel_2_l2a)
+    fitmat = bare_matrix(c, timname)
     xmap(
-        fit_sincos, 
-        c ⊘ timname, 
-        output=XOutput(DD.Dim{:param}(["p1","p2","p3"]),outtype=Float32),
+        fit_sincos,
+        c ⊘ timname,
+        output=XOutput(DD.Dim{:param}(["p1", "p2", "p3"]), outtype=Float32),
         inplace=false,
         function_args=(fitmat,),
         allow_threads=true
     )
 end
 
-function fit_sincos(ts,fitmat)
-    igood = findall(!isnan,ts)
-    view(fitmat,igood,:) \ view(ts,igood)
+function fit_sincos(ts, fitmat)
+    igood = findall(!isnan, ts)
+    view(fitmat, igood, :) \ view(ts, igood)
 end
 
-function bare_matrix(c,timname)
+function bare_matrix(c, timname)
     ms_per_year = 365.25*24*60*60*1000
-    timdim = DD.dims(c,timname)
+    timdim = DD.dims(c, timname)
     t = map(timdim.val) do x
         (x-first(timdim)).value/ms_per_year*2pi
     end
-    [sin.(t) cos.(t) fill(1.0,length(t))]
+    [sin.(t) cos.(t) fill(1.0, length(t))]
 end
 
 function nstrata(strata)
@@ -41,20 +41,20 @@ end
 
 Computes a cloud-biased corrected footprint of `dataset[band]` aggregated by stratification band `strata`. 
 """
-function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC", timeaxis=:time_sentinel_2_l2a)
+function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC", timeaxis=:time_sentinel_2_l2a, fpstat=mean)
     ncl = nstrata(strata)
     lccube = lckeymap(dataset, strata=strata)
     cloudhalocube = dataset.cloudmask_halo
     inputcube = dataset[band]
-    pars = ARCEMEAnalysis.sincosparams(inputcube)[:,:,:,1]
-    timdim = DD.dims(inputcube,timeaxis)
-    fitmat = YAXArray((timdim, pars.param),ARCEMEAnalysis.bare_matrix(inputcube,timeaxis))
+    pars = ARCEMEAnalysis.sincosparams(inputcube)[:, :, :, 1]
+    timdim = DD.dims(inputcube, timeaxis)
+    fitmat = YAXArray((timdim, pars.param), ARCEMEAnalysis.bare_matrix(inputcube, timeaxis))
 
-    # clearsky_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, inplace=false, lazy=true) do p, t
+    # clearsky_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, inplace=false) do p, t
     #     p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
     # end
     # win_clearsky = YAXArrays.windows(clearsky_expected, lccube, expected_groups=1:ncl)
-    # fp_clearsky_expected = YAXArrays.compute(mean.(win_clearsky).data)[:, 1, 1, 1, :]
+    # fp_clearsky_expected = mean.(win_clearsky)[:, 1, 1, 1, :].data
 
     # clouded_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, cloudcube, sclcube, inplace=false) do p, t, cl, scl
     #     if _is_cloud(cl,scl)
@@ -77,11 +77,11 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
             out[3] = x
         end
     end
-
     win_data = YAXArrays.windows(predcube, lccube, expected_groups=1:ncl)
     fp = YAXArrays.compute(xmap(mean, win_data, min_nvalid=50000).data, showprogress=false)[:, :, 1, 1, 1, :]
     # win_data = YAXArrays.windows(inputcube_filtered, lccube, expected_groups=1:ncl)
     # fp = YAXArrays.compute(mean.(win_data).data)[:, 1, 1, :]
+
 
     newdata = fp[:, 3, :] .+ fp[:, 1, :] .- fp[:, 2, :]
 
@@ -90,7 +90,7 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
     abundance = counter(lccube)
 
     Dataset(
-        fp = YAXArray((classax,timdim),newdata),
+        fp=YAXArray((classax, timdim), newdata),
         fp_uncorrected=YAXArray((classax, timdim), fp[:, 3, :]),
         fp_clearsky_expected=YAXArray((classax, timdim), fp[:, 1, :]),
         fp_clouded_expected=YAXArray((classax, timdim), fp[:, 2, :]),
@@ -98,7 +98,7 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
         smooth_matrix=fitmat,
         class_fractions=YAXArray((classax,), [abundance[i] for i in 1:ncl])
     )
-    
+
 end
 
 """
@@ -106,14 +106,14 @@ end
 
 Computes the footprint of `dataset[band]` aggregated by stratification classes in band `strata`. 
 """
-function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_sentinel_1_rtc)
+function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_sentinel_1_rtc, fpstat=mean)
     ncl = nstrata(strata)
     lccube = lckeymap(dataset, strata=strata)
     inputcube = dataset[band]
-    timdim = DD.dims(inputcube,timeaxis)
-    
+    timdim = DD.dims(inputcube, timeaxis)
+
     win = YAXArrays.windows(inputcube, lccube, expected_groups=1:ncl)
-    fp = mean.(win)[:,1,1,:].data
+    fp = fpstat.(win)[:, 1, 1, :].data
 
     abundance = counter(lccube)
     classax = classaxis(strata, ncl)
@@ -123,5 +123,5 @@ function arceme_uncorrected_fp(band, dataset; strata="ESA_LC", timeaxis=:time_se
         fp=YAXArray((classax, timdim), fp),
         class_fractions=YAXArray((classax,), [abundance[i] for i in 1:ncl])
     )
-    
+
 end

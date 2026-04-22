@@ -6,7 +6,7 @@ import DimensionalData as DD
 using Colors: RGB, RGBA
 using Dates: DateTime, Year, Date
 import CSV
-using Statistics: mean
+using Statistics: mean, median
 using DataStructures: SortedDict, counter
 using ProgressMeter: @showprogress
 using SpectralIndices: compute_index, SpectralIndices
@@ -33,7 +33,7 @@ const arceme_legends = Dict(
     ),
     # Main Crop Type
     "CTY" => SortedDict(
-        0 =>  "No cropland",
+        0 => "No cropland",
         1110 => "Wheat",
         1120 => "Barley",
         1130 => "Maize",
@@ -57,16 +57,16 @@ const arceme_legends = Dict(
     ),
     # Secondary Crop Type
     "CPSCT" => SortedDict(
-        0 => "No annual cropland", 
+        0 => "No annual cropland",
         1 => "Short Summer",
         2 => "Long Summer",
         3 => "Short Winter",
-        4 => "Long Winter", 
-        65526 => "Fallow land", 
-        65527 => "No cropping pattern detected",  
+        4 => "Long Winter",
+        65526 => "Fallow land",
+        65527 => "No cropping pattern detected",
         65530 => "No secondary crop growing season delineated",
-        65531 => "Not enough data", 
-        65532 => "No cropping season detected",  
+        65531 => "Not enough data",
+        65532 => "No cropping season detected",
         65533 => "Growing season extends beyond timeframe",
         65535 => "Outside area"
     ),
@@ -78,13 +78,13 @@ const arceme_legends = Dict(
     ),
     # Cropping Seasons in Year
     "CPCSY" => SortedDict(
-        0 => "No annual cropland", 
+        0 => "No annual cropland",
         1 => "One growing season",
         2 => "Two growing seasons",
-        65526 => "Fallow land", 
-        65527 => "No cropping pattern detected",  
-        65531 => "Not enough data", 
-        65532 => "No cropping season detected",  
+        65526 => "Fallow land",
+        65527 => "No cropping pattern detected",
+        65531 => "Not enough data",
+        65532 => "No cropping season detected",
         65533 => "Growing season extends beyond timeframe",
         65535 => "Outside area"
     ),
@@ -98,22 +98,22 @@ const arceme_legends = Dict(
     # Grassland
     "GRA" => SortedDict(
         0 => "all non-grassland areas",
-        1 => "grassland", 
+        1 => "grassland",
         255 => "outside area",
     ),
     "ESA_LC" => SortedDict(
-    0 => "No data",
-    10 => "Tree cover",
-    20 => "Shrubland",
-    30 => "Grassland",
-    40 => "Cropland",
-    50 => "Built-up",
-    60 => "Bare /sparse vegetation",
-    70 => "Snow and Ice",
-    80 => "Permanent water bodies",
-    90 => "Herbaceous wetland",
-    95 => "Mangroves",
-    100 => "Moss and lichen",
+        0 => "No data",
+        10 => "Tree cover",
+        20 => "Shrubland",
+        30 => "Grassland",
+        40 => "Cropland",
+        50 => "Built-up",
+        60 => "Bare /sparse vegetation",
+        70 => "Snow and Ice",
+        80 => "Permanent water bodies",
+        90 => "Herbaceous wetland",
+        95 => "Mangroves",
+        100 => "Moss and lichen",
     )
 )
 lckeymap(k) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
@@ -627,11 +627,11 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
     end
 end
 """
-`arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC")`
+`arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC", fpstat=mean)`
 
-Computes fingerprints for indices, stratified by `strata`.
+Computes fingerprints for indices, stratified by `strata` using statistic `fpstat`.
 """
-function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC")
+function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC", fpstat=mean)
 
     #banddim = DD.Dim{:band}(string.(optical_bands))
     indices_s2 = filter(i -> in(Symbol(i), keys(ds.cubes)), indices_s2) |> collect
