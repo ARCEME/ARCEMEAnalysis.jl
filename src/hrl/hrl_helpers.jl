@@ -1,7 +1,7 @@
 module HRL
 using ARCEMEAnalysis
 import CondaPkg
-using  PythonCall: pyimport, pyconvert, pylist
+using PythonCall: pyimport, pyconvert, pylist
 import GeoJSON
 using Preferences: @set_preferences!, @load_preference
 import ArchGDAL as AG
@@ -26,7 +26,7 @@ end
 const hrl_localpath = @load_preference("hrl_localpath", pwd())
 
 if !isdir(hrl_localpath)
-  mkdir(hrl_localpath)
+    mkdir(hrl_localpath)
 end
 
 
@@ -37,18 +37,20 @@ Sets up client to Harmonised Data Access API on WEkEO
 Returns HDA client as Python Object
 """
 function hrl_hda()
-# Harmonised Data Access API on WEkEO
-  hda = try pyimport("hda") #("Client", "Configuration")
-  catch
-      CondaPkg.add("hda")
-      pyimport("hda")
-  end
-  # Configure user's credentials with a .hdarc file
-  hda_client = try hda.Client()
-  catch
-      @error "Please configure your WEkEO user's credentials with a .hdarc file  (see https://hda.readthedocs.io/en/latest/usage.html#client-configuration for details)"
-  end
-  return hda_client
+    # Harmonised Data Access API on WEkEO
+    hda = try
+        pyimport("hda") #("Client", "Configuration")
+    catch
+        CondaPkg.add("hda")
+        pyimport("hda")
+    end
+    # Configure user's credentials with a .hdarc file
+    hda_client = try
+        hda.Client()
+    catch
+        @error "Please configure your WEkEO user's credentials with a .hdarc file  (see https://hda.readthedocs.io/en/latest/usage.html#client-configuration for details)"
+    end
+    return hda_client
 end
 
 """
@@ -58,12 +60,12 @@ Search for all datasets available on WEkEO in whose name `filteron` occurs. Very
 
 Returns a `Vector` of `String`s
 """
-function hda_datasets(;filteron="HRL")
-  hda_client = hrl_hda()
-  datasets = hda_client.datasets() 
-  dataset_ids = [item["dataset_id"] for item in datasets] 
-  # convert to julia
-  pyconvert(Vector{String}, dataset_ids) |> filter(x -> occursin(filteron, x))
+function hda_datasets(; filteron="HRL")
+    hda_client = hrl_hda()
+    datasets = hda_client.datasets()
+    dataset_ids = [item["dataset_id"] for item in datasets]
+    # convert to julia
+    pyconvert(Vector{String}, dataset_ids) |> filter(x -> occursin(filteron, x))
 end
 
 """
@@ -73,9 +75,9 @@ Lists all valid productType for `dataset_id` on WEkEO.
 Returns a vector of strings
 """
 function hda_products(dataset_id)
-  hda_client = hrl_hda()
-  metadata = hda_client.metadata(dataset_id)
-  map(x -> x["const"], pyconvert(Vector{Dict},metadata["properties"]["productType"]["oneOf"]))
+    hda_client = hrl_hda()
+    metadata = hda_client.metadata(dataset_id)
+    map(x -> x["const"], pyconvert(Vector{Dict}, metadata["properties"]["productType"]["oneOf"]))
 end
 
 """
@@ -84,10 +86,10 @@ end
 Lists all valid years or epochs for `dataset_id` on WEkEO.
 Returns a vector of strings
 """
-function  hda_years(dataset_id)
-  hda_client = hrl_hda()
-  metadata = hda_client.metadata(dataset_id)
-  map(x -> x["const"], pyconvert(Vector{Dict},metadata["properties"]["year"]["oneOf"]))
+function hda_years(dataset_id)
+    hda_client = hrl_hda()
+    metadata = hda_client.metadata(dataset_id)
+    map(x -> x["const"], pyconvert(Vector{Dict}, metadata["properties"]["year"]["oneOf"]))
 end
 
 
@@ -110,16 +112,16 @@ function hrl_download(dataset_id::String, coord::Tuple, yr::Union{String,Int}; e
     hda_client = hrl_hda()
     json = pyimport("json")
 
-    (lon,lat) = coord
+    (lon, lat) = coord
     fnames = []
 
     # Build query as a JSON object
     if !isnothing(product)
-      pt = """,
-      "productType": "$(product)"
-      """
+        pt = """,
+        "productType": "$(product)"
+        """
     else
-      pt = ""
+        pt = ""
     end
 
     query = """
@@ -137,35 +139,35 @@ function hrl_download(dataset_id::String, coord::Tuple, yr::Union{String,Int}; e
       "startIndex": 0$(pt)
     }
     """
-    
+
     matches = hda_client.search(json.loads(query))
     try
-    for item in matches.results
-      # println(item["id"])
-      filename = pyconvert(String, item["id"])*".zip"
-      # store info:
-      push!(fnames, filename)
-    end
+        for item in matches.results
+            # println(item["id"])
+            filename = pyconvert(String, item["id"]) * ".zip"
+            # store info:
+            push!(fnames, filename)
+        end
     catch
-      @warn "No matches found for $(dataset_id) at $(coordinates) in year $(yr)"
-      return fnames
+        @warn "No matches found for $(dataset_id) at $(coordinates) in year $(yr)"
+        return fnames
     end
 
     # Download
-    todownload = [!isfile(joinpath(hrl_localpath, pyconvert(String, item["id"])*".zip")) for  item in matches.results]
-    @showprogress desc="Downloading..." for i in pylist(findall(todownload).-1)
-    #   println("Downloading $(matches.results[i]["id"])")
-      matches[i].download(download_dir=hrl_localpath) 
+    todownload = [!isfile(joinpath(hrl_localpath, pyconvert(String, item["id"]) * ".zip")) for item in matches.results]
+    @showprogress desc = "Downloading..." for i in pylist(findall(todownload) .- 1)
+        #   println("Downloading $(matches.results[i]["id"])")
+        matches[i].download(download_dir=hrl_localpath)
     end
     return fnames
 end
 
 function hrl_download(datasets::Vector{String}, coord::Tuple, yr::Union{String,Int}; kwargs...)
-  fnames=[];
-  for dataset_id in datasets
-      append!(fnames, HRL.hrl_download(dataset_id, coord, yr; kwargs...))
-  end
-  return fnames
+    fnames = []
+    for dataset_id in datasets
+        append!(fnames, HRL.hrl_download(dataset_id, coord, yr; kwargs...))
+    end
+    return fnames
 end
 
 const hrl_dict = Dict(
@@ -200,7 +202,7 @@ const hrl_dict = Dict(
     "GRACL" => "Grassland Confidence Layer",
     "HER" => "Herbaceous Cover",
     "PLOUGH" => "Ploughing Indicator",
-    "GRAME"  => "Grassland Mowing Events",
+    "GRAME" => "Grassland Mowing Events",
     "GRAMECL" => "Grassland Mowing Events Confidence Layer",
     "GRAMD1" => "Grassland Mowing Dates of first mowing event",
     "GRAMD2" => "Grassland Mowing Dates of second mowing event",
@@ -215,7 +217,7 @@ const hrl_legends = Dict(
         3 => "Permanent crop"
     ),
     "CTY" => SortedDict(
-        0 =>  "No cropland",
+        0 => "No cropland",
         1110 => "Wheat",
         1120 => "Barley",
         1130 => "Maize",
@@ -254,7 +256,7 @@ const hrl_legends = Dict(
         65532 No cropping season detected. 
         65533 Growing season extends beyond timeframe. 
         64534 No confidence could be calculated.
-        65535 Outside area.",   
+        65535 Outside area.",
     "CPMCE" => "Emergence date as YYDOY where YY = last 2 digits of the year (e.g., 19 for 2019) and DOY is the day of the year (1-366). 
         0 No annual cropland. 
         65526 Fallow land. 
@@ -328,16 +330,16 @@ const hrl_legends = Dict(
         64534 No confidence could be calculated.
         65535 Outside area.",
     "CPSCT" => SortedDict(
-        0 => "No annual cropland", 
+        0 => "No annual cropland",
         1 => "Short Summer",
         2 => "Long Summer",
         3 => "Short Winter",
-        4 => "Long Winter", 
-        65526 => "Fallow land", 
-        65527 => "No cropping pattern detected",  
+        4 => "Long Winter",
+        65526 => "Fallow land",
+        65527 => "No cropping pattern detected",
         65530 => "No secondary crop growing season delineated",
-        65531 => "Not enough data", 
-        65532 => "No cropping season detected",  
+        65531 => "Not enough data",
+        65532 => "No cropping season detected",
         65533 => "Growing season extends beyond timeframe",
         65535 => "Outside area"
     ),
@@ -376,13 +378,13 @@ const hrl_legends = Dict(
     ),
     "CPFLPCL" => "0-100 Probability expressed as a percentage. 253 No Cropland. 65535 Outside area",
     "CPCSY" => SortedDict(
-        0 => "No annual cropland", 
+        0 => "No annual cropland",
         1 => "One growing season",
         2 => "Two growing seasons",
-        65526 => "Fallow land", 
-        65527 => "No cropping pattern detected",  
-        65531 => "Not enough data", 
-        65532 => "No cropping season detected",  
+        65526 => "Fallow land",
+        65527 => "No cropping pattern detected",
+        65531 => "Not enough data",
+        65532 => "No cropping season detected",
         65533 => "Growing season extends beyond timeframe",
         65535 => "Outside area"
     ),
@@ -405,7 +407,7 @@ const hrl_legends = Dict(
     # Grassland
     "GRA" => SortedDict(
         0 => "all non-grassland areas",
-        1 => "grassland", 
+        1 => "grassland",
         255 => "outside area",
     ),
     "GRACL" => "0-100: Classification confidence. 253: All non-grassland areas. 255: outside area",
@@ -419,8 +421,8 @@ const hrl_legends = Dict(
     100: Change in herbaceous cover. 
     253: no ploughing information. 
     255: outside area",
-    "GRAME"  => SortedDict(
-        0 => "no mowing detected", 
+    "GRAME" => SortedDict(
+        0 => "no mowing detected",
         1 => "1 mowing event detected",
         2 => "2 mowing events",
         3 => "3 mowing events",
@@ -444,48 +446,48 @@ reprojects and clips files in `fnames` to match `event`'s coordinate reference s
  and saves them as a Zarr group in `batch-HRL` under `ARCEMEAnalysis.local_cubepath`.
 """
 function hrl_warp(cubename, fnames::Vector; batch="ARCEME-DC-6")
-  ds = arceme_open(cubename; batch)
-  event_date = event_date = arceme_eventdate(ds)
-  tmp = tempname(;suffix=".tif")
-  res = ds.properties["resolution"]
-  tmp = tempname(;suffix=".tif")
+    ds = arceme_open(cubename; batch)
+    event_date = event_date = arceme_eventdate(ds)
+    tmp = tempname(; suffix=".tif")
+    res = ds.properties["resolution"]
+    tmp = tempname(; suffix=".tif")
 
-  for hrl in keys(hrl_dict)
-    hrl_fnames = fnames[map(contains("$(hrl)_"), fnames)]
-    if isempty(hrl_fnames)
-        continue
-    end
-    run(Cmd(
-        `gdalwarp 
-            -t_srs $(AG.toPROJ4(AG.importEPSG(ds.properties["epsg"]))) 
-            -tr $res $res
-            -te $(minimum(ds.x)) $(minimum(ds.y)) $(maximum(ds.x)+res) $(maximum(ds.y)+res) 
-            -r near
-            $(["/vsizip/$(joinpath(hrl_localpath, hrl_fnames[i], "$(split(hrl_fnames[i],".")[1]).tif") )" for i in eachindex(hrl_fnames)]) 
-            $tmp 
-            -overwrite 
-            `))
-    c = Cube(tmp)
-    # write to zarr
-    props = Dict(
-        "long_name" => hrl_dict["$(split(hrl_fnames[1],"_")[3])"],
-        "year_coverage" => year(event_date),
-        "legend" => hrl_legends["$(split(hrl_fnames[1],"_")[3])"],
-        "epsg" => ds.properties["epsg"], 
-        "resolution" => 10,
-        "unit" => "meter",
-        "source" => "$(join(hrl_fnames, ", ")) © European Union, Copernicus Land Monitoring Service 2025, European Environment Agency (EEA)",
-        "processing" => "Downloaded from wEkEO. Reprojected to EPSG $(ds.properties["epsg"]) using nearest neighour, mosaicked and clipped to AOI with gdalwarp",
-        "processed_by" => "M. Weynants, MPI-BGC",
-        "processed_date" => string(Date(now())),
-    )
-    c2 = YAXArray((ds.x,ds.y), c.data, props, )
-    nt = (Symbol("$(split(hrl_fnames[1],"_")[3])")=>c2,)
-    tds = Dataset(;nt...)
-    tds = setchunks(tds, (500,500))
-    savedataset(tds, 
-        path=joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$(split(cubename,".")[1]).zarr"), 
-        append=true)
+    for hrl in keys(hrl_dict)
+        hrl_fnames = fnames[map(contains("$(hrl)_"), fnames)]
+        if isempty(hrl_fnames)
+            continue
+        end
+        run(Cmd(
+            `gdalwarp 
+                -t_srs $(AG.toPROJ4(AG.importEPSG(ds.properties["epsg"]))) 
+                -tr $res $res
+                -te $(minimum(ds.x)) $(minimum(ds.y)) $(maximum(ds.x)+res) $(maximum(ds.y)+res) 
+                -r near
+                $(["/vsizip/$(joinpath(hrl_localpath, hrl_fnames[i], "$(split(hrl_fnames[i],".")[1]).tif") )" for i in eachindex(hrl_fnames)]) 
+                $tmp 
+                -overwrite 
+                `))
+        c = Cube(tmp)
+        # write to zarr
+        props = Dict(
+            "long_name" => hrl_dict["$(split(hrl_fnames[1],"_")[3])"],
+            "year_coverage" => year(event_date),
+            "legend" => hrl_legends["$(split(hrl_fnames[1],"_")[3])"],
+            "epsg" => ds.properties["epsg"],
+            "resolution" => 10,
+            "unit" => "meter",
+            "source" => "$(join(hrl_fnames, ", ")) © European Union, Copernicus Land Monitoring Service 2025, European Environment Agency (EEA)",
+            "processing" => "Downloaded from wEkEO. Reprojected to EPSG $(ds.properties["epsg"]) using nearest neighour, mosaicked and clipped to AOI with gdalwarp",
+            "processed_by" => "M. Weynants, MPI-BGC",
+            "processed_date" => string(Date(now())),
+        )
+        c2 = YAXArray((ds.x, ds.y), c.data, props,)
+        nt = (Symbol("$(split(hrl_fnames[1],"_")[3])") => c2,)
+        tds = Dataset(; nt...)
+        tds = setchunks(tds, (500, 500))
+        savedataset(tds,
+            path=joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$(split(cubename,".")[1]).zarr"),
+            append=true)
     end
     # zip
     run(Cmd(`zip -0 -r ../$(split(cubename,".")[1]).zarr.zip .`, dir=joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$(split(cubename,".")[1]).zarr")))
@@ -495,17 +497,17 @@ end
 
 hrl_warp(event::ARCEMEAnalysis.Event; kwargs...) = hrl_warp(arceme_cubename(event); kwargs...)
 
-function hrl_warp(cubename::String; batch="ARCEME-DC-6", dataset_id::Union{String, Vector{String}}=["EO:EEA:DAT:HRL:CRL", "EO:EEA:DAT:HRL:TCF", "EO:EEA:DAT:HRL:GRA"])
-  ds = arceme_open(cubename; batch=batch)
-  coord = arceme_coordinates(ds)
-  yr = year(arceme_eventdate(ds))
-  fnames = hrl_download(dataset_id, coord, yr)
-  hrl_warp(cubename, fnames; batch)
+function hrl_warp(cubename::String; batch="ARCEME-DC-6", dataset_id::Union{String,Vector{String}}=["EO:EEA:DAT:HRL:CRL", "EO:EEA:DAT:HRL:TCF", "EO:EEA:DAT:HRL:GRA"])
+    ds = arceme_open(cubename; batch=batch)
+    coord = arceme_coordinates(ds)
+    yr = year(arceme_eventdate(ds))
+    fnames = hrl_download(dataset_id, coord, yr)
+    hrl_warp(cubename, fnames; batch)
 end
 
 """
      arceme_stats(ds::YAXArrays.Dataset, name; classes=nothing)
-     arceme_stats(ev::Event, name; batch="ARCEME-DC-6", classes=nothing)
+     arceme_stats(ev::Event, name; batch="ARCEME-DC-8", classes=nothing)
 
 Get the  statistics of layer `name` for the ARCEME data cube `ds`.
 Default classes are extracted from `hrl_legends[name]`. Alternative classes can be provided as a dictionary.
@@ -514,35 +516,35 @@ function arceme_stats(ds, name; classes=nothing)
     if isnothing(classes)
         classes = hrl_legends[name]
     end
-    cdr = counter(ds[name]);
-    map(collect(classes)) do (k,v)
-        count=get(cdr, k, 0)
-        (key=k, class=v, count=count, fraction=count/1000000)
+    cdr = counter(ds[name])
+    map(collect(classes)) do (k, v)
+        count = get(cdr, k, 0)
+        (key=k, class=v, count=count, fraction=count / (length(ds.x) * length(ds.y)))
     end
 end
-arceme_stats(ev::ARCEMEAnalysis.Event, name; batch="ARCEME-DC-6", classes=nothing) = arceme_stats(arceme_open(ev, batch=batch), name; classes = classes)
+arceme_stats(ev::ARCEMEAnalysis.Event, name; batch="ARCEME-DC-8", classes=nothing) = arceme_stats(arceme_open(ev, batch=batch), name; classes=classes)
 
 function ctykeymap(k)
     k == 0 && return 1
     k > 3000 && return 1
     ctL1 = k ÷ 1000
-    ctL2 = (k - 1000*ctL1) ÷ 100
-    ctL3 = (k - 1000*ctL1 - 100*ctL2) ÷ 10
-    ctL1==1 && ctL2==1 && return ctL3+1 # cereals
-    ctL1==1 && ctL2==2 && return ctL3+6 # vegetables and pulses
-    ctL1==1 && ctL2==3 && return ctL3+8 # roots (potato, sugar beet)
-    ctL1==1 && ctL2==4 && return ctL3+10 # oil (sunflower, soy, rapeseed)
-    ctL1==2 && ctL2==1 && return ctL3+15 # fiber (flax, cotton, hemp)
-    ctL1==2 && ctL2==2 && return ctL2+14 # grape, olive
-    ctL1==2 && ctL2==3 && return ctL3+16 # fruit, nuts
+    ctL2 = (k - 1000 * ctL1) ÷ 100
+    ctL3 = (k - 1000 * ctL1 - 100 * ctL2) ÷ 10
+    ctL1 == 1 && ctL2 == 1 && return ctL3 + 1 # cereals
+    ctL1 == 1 && ctL2 == 2 && return ctL3 + 6 # vegetables and pulses
+    ctL1 == 1 && ctL2 == 3 && return ctL3 + 8 # roots (potato, sugar beet)
+    ctL1 == 1 && ctL2 == 4 && return ctL3 + 10 # oil (sunflower, soy, rapeseed)
+    ctL1 == 2 && ctL2 == 1 && return ctL3 + 15 # fiber (flax, cotton, hemp)
+    ctL1 == 2 && ctL2 == 2 && return ctL2 + 14 # grape, olive
+    ctL1 == 2 && ctL2 == 3 && return ctL3 + 16 # fruit, nuts
 end
 
 function mctykeymap(k)
     k == 0 && return 1 # non crop
     k == 65535 && return 1
     ctL1 = k ÷ 1000
-    ctL2 = (k - 1000*ctL1) ÷ 100
-    ctL3 = (k - 1000*ctL1 - 100*ctL2) ÷ 10
+    ctL2 = (k - 1000 * ctL1) ÷ 100
+    ctL3 = (k - 1000 * ctL1 - 100 * ctL2) ÷ 10
     ctL1 == 1 && return 2 # annual crops
     # ctL1 == 2 && ctL2 == 1 && return 2 # annual fiber
     ctL1 == 2 && return 3 # permanent crop
