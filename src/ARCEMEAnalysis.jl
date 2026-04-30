@@ -1,7 +1,17 @@
 module ARCEMEAnalysis
 using Zarr: S3Store, Zarr
 using Minio: MinioConfig
-using YAXArrays: open_dataset, ⊘, xmap, XOutput, YAXArray, YAXArrays, Dataset, setchunks, compute_to_zarr, savedataset
+using YAXArrays:
+    open_dataset,
+    ⊘,
+    xmap,
+    XOutput,
+    YAXArray,
+    YAXArrays,
+    Dataset,
+    setchunks,
+    compute_to_zarr,
+    savedataset
 import DimensionalData as DD
 using Colors: RGB, RGBA
 using Dates: DateTime, Year, Date
@@ -17,8 +27,14 @@ import Distributed: nprocs, pmap
 
 function __init__()
     #Extend SpectralIndices band definitions with S1 bands
-    s1vv = Dict{String,SI.PlatformBand}("sentinel1" => SI.PlatformBand("sentinel1", "VV", "Vertical-Vertical", 5.55e7, 1e5))
-    s1vh = Dict{String,SI.PlatformBand}("sentinel1" => SI.PlatformBand("sentinel1", "VH", "Vertical-Horizontal", 5.55e7, 1e5))
+    s1vv = Dict{String,SI.PlatformBand}(
+        "sentinel1" =>
+            SI.PlatformBand("sentinel1", "VV", "Vertical-Vertical", 5.55e7, 1e5),
+    )
+    s1vh = Dict{String,SI.PlatformBand}(
+        "sentinel1" =>
+            SI.PlatformBand("sentinel1", "VH", "Vertical-Horizontal", 5.55e7, 1e5),
+    )
 
     SI.bands["VV"] = SI.Band("VV", "Vertical-Vertical", "vv", 5.54e7, 5.56e7, s1vv)
     SI.bands["VH"] = SI.Band("VH", "Vertical-Horizontal", "vh", 5.54e7, 5.56e7, s1vh)
@@ -26,11 +42,7 @@ end
 
 const arceme_legends = Dict(
     # Major Main Crop Type
-    "MCTY" => SortedDict(
-        1 => "No cropland",
-        2 => "Annual crop",
-        3 => "Permanent crop"
-    ),
+    "MCTY" => SortedDict(1 => "No cropland", 2 => "Annual crop", 3 => "Permanent crop"),
     # Main Crop Type
     "CTY" => SortedDict(
         0 => "No cropland",
@@ -53,7 +65,7 @@ const arceme_legends = Dict(
         2320 => "Nuts",
         3100 => "Unclassified annual crop",
         3200 => "Unclassified permanent crop",
-        65535 => "Outside area"
+        65535 => "Outside area",
     ),
     # Secondary Crop Type
     "CPSCT" => SortedDict(
@@ -68,14 +80,11 @@ const arceme_legends = Dict(
         65531 => "Not enough data",
         65532 => "No cropping season detected",
         65533 => "Growing season extends beyond timeframe",
-        65535 => "Outside area"
+        65535 => "Outside area",
     ),
     # Fallow Land
-    "CPFLP" => SortedDict(
-        0 => "No fallow land",
-        1 => "Fallow land",
-        65535 => "Outside area"
-    ),
+    "CPFLP" =>
+        SortedDict(0 => "No fallow land", 1 => "Fallow land", 65535 => "Outside area"),
     # Cropping Seasons in Year
     "CPCSY" => SortedDict(
         0 => "No annual cropland",
@@ -86,7 +95,7 @@ const arceme_legends = Dict(
         65531 => "Not enough data",
         65532 => "No cropping season detected",
         65533 => "Growing season extends beyond timeframe",
-        65535 => "Outside area"
+        65535 => "Outside area",
     ),
     # Tree cover: Leaf Type
     "DLT" => SortedDict(
@@ -114,10 +123,10 @@ const arceme_legends = Dict(
         90 => "Herbaceous wetland",
         95 => "Mangroves",
         100 => "Moss and lichen",
-    )
+    ),
 )
 lckeymap(k) = ifelse(k > 90, (k + 10), k) ÷ 10 + 1
-function lckeymap(ds::Dataset; strata="ESA_LC")
+function lckeymap(ds::Dataset; strata = "ESA_LC")
     if strata == "ESA_LC" && return lckeymap.(ds.ESA_LC[time=1])
     end
     if strata == "CTY" && return HRL.ctykeymap.(ds.CTY)
@@ -127,19 +136,38 @@ function lckeymap(ds::Dataset; strata="ESA_LC")
 end
 
 
-export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_eventdate,
-    arceme_coordinates, arceme_ndvi, arceme_rgb, arceme_eventlist, arceme_eventpairs,
-    arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
-    time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
-    arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint, arceme_fractions,
-    arceme_legends, arceme_cloudmask_halo, arceme_precompute_fingerprints
+export arceme_cubename,
+    arceme_open,
+    arceme_starttime,
+    arceme_endtime,
+    arceme_eventdate,
+    arceme_coordinates,
+    arceme_ndvi,
+    arceme_rgb,
+    arceme_eventlist,
+    arceme_eventpairs,
+    arceme_landcover,
+    arceme_optical_band_fingerprints,
+    arceme_radar_fingerprints,
+    time_aggregate_fingerprint,
+    arceme_validpairs,
+    arceme_spectral,
+    arceme_kndvi,
+    arceme_radar_db,
+    arceme_create_indexcubes,
+    arceme_index_fingerprints,
+    arceme_open_fingerprint,
+    arceme_fractions,
+    arceme_legends,
+    arceme_cloudmask_halo,
+    arceme_precompute_fingerprints
 
 """
     _arceme_cubenames(;batch="6")
 
 List all available data cube names in the specified batch stored in the ARCEME S3 bucket.
 """
-function _arceme_cubenames(; batch="ARCEME-DC-DHP-GLOBAL")
+function _arceme_cubenames(; batch = "ARCEME-DC-DHP-GLOBAL")
     cubenames = if local_cubepath === nothing
         store = S3Store("$(batch)/", MinioConfig(httpstore))
 
@@ -183,7 +211,9 @@ end
 
 Get a list of ARCEME events from the local CSV or geojson file.
 """
-function arceme_eventlist(; csv=joinpath(@__DIR__, "..", "data", "dhp_global_subselection.csv"))
+function arceme_eventlist(;
+    csv = joinpath(@__DIR__, "..", "data", "dhp_global_subselection.csv"),
+)
     map(CSV.File(csv)) do row
         Event(
             row.uid,
@@ -203,7 +233,10 @@ function arceme_eventlist(; csv=joinpath(@__DIR__, "..", "data", "dhp_global_sub
     end
 end
 
-function arceme_eventlist(source::String; geojson=joinpath(@__DIR__, "..", "data/selection_eu_wocat_dhp_qdoy_hrl.geojson"))
+function arceme_eventlist(
+    source::String;
+    geojson = joinpath(@__DIR__, "..", "data/selection_eu_wocat_dhp_qdoy_hrl.geojson"),
+)
     map(GeoJSON.read(geojson)) do row
         Event(
             row.uid,
@@ -211,7 +244,8 @@ function arceme_eventlist(source::String; geojson=joinpath(@__DIR__, "..", "data
             row.geometry[1],
             row.geometry[2],
             DateTime(row.startdate),
-            Symbol(source),)
+            Symbol(source),
+        )
     end
 end
 
@@ -224,7 +258,8 @@ arceme_cubename(event::Event) =
 Get pairs of ARCEME events from the event list.
 """
 arceme_eventpairs() =
-    Iterators.partition(sort(arceme_eventlist(), by=i -> (i.event_label, i.source)), 2) |> collect
+    Iterators.partition(sort(arceme_eventlist(), by = i -> (i.event_label, i.source)), 2) |>
+    collect
 
 """
     arceme_validpairs(;batch="ARCEME-DC-DHP-GLOBAL")
@@ -232,25 +267,56 @@ arceme_eventpairs() =
 Get valid pairs of ARCEME events from the local path (if set with arceme_set_localpath) or the http data store.
 Default httpstore is "https://s3.waw3-2.cloudferro.com/swift/v1". It can be reset with arceme_set_httpstore.
 """
-function arceme_validpairs(; batch="ARCEME-DC-DHP-GLOBAL")
+function arceme_validpairs(; batch = "ARCEME-DC-DHP-GLOBAL")
     allpairs = arceme_eventpairs()
     validpairs = if local_cubepath === nothing
-        map(x -> all([Zarr.is_zgroup(Zarr.HTTPStore("$httpstore/$batch/$(arceme_cubename(i))"), "") for i in x]), allpairs)
+        map(
+            x -> all([
+                Zarr.is_zgroup(
+                    Zarr.HTTPStore("$httpstore/$batch/$(arceme_cubename(i))"),
+                    "",
+                ) for i in x
+            ]),
+            allpairs,
+        )
     else
-        map(x -> all([isfile(joinpath(local_cubepath, batch, string(arceme_cubename(i), ".zip"))) for i in x]), allpairs)
+        map(
+            x -> all([
+                isfile(joinpath(local_cubepath, batch, string(arceme_cubename(i), ".zip"))) for i in x
+            ]),
+            allpairs,
+        )
     end
     allpairs[validpairs]
 end
 
-function arceme_open(event::Event; batch="ARCEME-DC-DHP-GLOBAL", indices=true, trylocal=true, fingerprint=true, hrl=true)
-    arceme_open(arceme_cubename(event); batch=batch, indices=indices, trylocal=trylocal, fingerprint=fingerprint, hrl=true)
+function arceme_open(
+    event::Event;
+    batch = "ARCEME-DC-DHP-GLOBAL",
+    indices = true,
+    trylocal = true,
+    fingerprint = true,
+    hrl = true,
+)
+    arceme_open(
+        arceme_cubename(event);
+        batch = batch,
+        indices = indices,
+        trylocal = trylocal,
+        fingerprint = fingerprint,
+        hrl = true,
+    )
 end
 
-function arceme_open_fingerprint(event::Event; batch="ARCEME-DC-DHP-GLOBAL")
+function arceme_open_fingerprint(event::Event; batch = "ARCEME-DC-DHP-GLOBAL")
     arceme_open_fingerprint(arceme_cubename(event); batch)
 end
 
-arceme_open_fingerprint(cubename; batch="ARCEME-DC-DHP-GLOBAL") = open_dataset(joinpath(local_cubepath, "$batch-fingerprints.zip"), path=cubename, force_datetime=true)
+arceme_open_fingerprint(cubename; batch = "ARCEME-DC-DHP-GLOBAL") = open_dataset(
+    joinpath(local_cubepath, "$batch-fingerprints.zip"),
+    path = cubename,
+    force_datetime = true,
+)
 
 """
      arceme_landcover(ds)
@@ -261,10 +327,16 @@ function arceme_landcover(ds)
     cdr = counter(ds.ESA_LC)
     map(collect(arceme_legends["ESA_LC"])) do (k, v)
         count = get(cdr, k, 0)
-        (key=k, class=v, count=count, fraction=count / 1000000)
+        (
+            key = k,
+            class = v,
+            count = count,
+            fraction = count / (length(ds.x) * length(ds.y)),
+        )
     end
 end
-arceme_landcover(ev::Event; batch="ARCEME-DC-DHP-GLOBAL") = arceme_landcover(arceme_open(ev, batch=batch))
+arceme_landcover(ev::Event; batch = "ARCEME-DC-DHP-GLOBAL") =
+    arceme_landcover(arceme_open(ev, batch = batch))
 
 
 """ 
@@ -277,11 +349,21 @@ If `indices=true` (`hrl=true`), also opens indices (hrl layers) if they exist on
 
 See also `arceme_create_indexcubes` and `HRL.hrl_warp`.
 """
-function arceme_open(cubename; batch="ARCEME-DC-DHP-GLOBAL", indices=true, trylocal=true, fingerprint=true, hrl=true)
+function arceme_open(
+    cubename;
+    batch = "ARCEME-DC-DHP-GLOBAL",
+    indices = true,
+    trylocal = true,
+    fingerprint = true,
+    hrl = true,
+)
     if local_cubepath === nothing || !trylocal
-        open_dataset("$httpstore/$batch/$cubename", force_datetime=true)
+        open_dataset("$httpstore/$batch/$cubename", force_datetime = true)
     else
-        main_ds = open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")), force_datetime=true)
+        main_ds = open_dataset(
+            joinpath(local_cubepath, batch, string(cubename, ".zip")),
+            force_datetime = true,
+        )
         if batch == "ARCEME-DC-DHP-GLOBAL"
             # if :ESA_LC ∉ keys(main_ds.cubes)
             #     @show cubename
@@ -289,15 +371,37 @@ function arceme_open(cubename; batch="ARCEME-DC-DHP-GLOBAL", indices=true, trylo
             #     main_ds.cubes[:ESA_LC] = oldds.ESA_LC
             # end
             if :B01 ∉ keys(main_ds.cubes)
-                oldds = open_dataset(joinpath(local_cubepath, "ARCEME-DC-6", string(cubename, ".zip")), force_datetime=true)
+                oldds = open_dataset(
+                    joinpath(local_cubepath, "ARCEME-DC-6", string(cubename, ".zip")),
+                    force_datetime = true,
+                )
                 main_ds.axes[:time_sentinel_2_l2a] = oldds.axes[:time_sentinel_2_l2a]
-                for v in [:B01, :B02, :B03, :B04, :B05, :B06, :B07, :B08, :B09, :B11, :B12, :B8A, :SCL, :cloud_mask]
+                for v in [
+                    :B01,
+                    :B02,
+                    :B03,
+                    :B04,
+                    :B05,
+                    :B06,
+                    :B07,
+                    :B08,
+                    :B09,
+                    :B11,
+                    :B12,
+                    :B8A,
+                    :SCL,
+                    :cloud_mask,
+                ]
                     main_ds.cubes[v] = oldds.cubes[v]
                 end
             end
         end
-        if indices && isfile(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
-            index_ds = open_dataset(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")), force_datetime=true)
+        if indices &&
+           isfile(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
+            index_ds = open_dataset(
+                joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")),
+                force_datetime = true,
+            )
             for (k, v) in (index_ds.cubes)
                 main_ds.cubes[k] = v
             end
@@ -305,13 +409,19 @@ function arceme_open(cubename; batch="ARCEME-DC-DHP-GLOBAL", indices=true, trylo
         if fingerprint
             try
                 ds_fp = arceme_open_fingerprint(cubename; batch)
-                main_ds = Dataset(; main_ds.cubes..., ds_fp.cubes..., properties=main_ds.properties)
+                main_ds = Dataset(;
+                    main_ds.cubes...,
+                    ds_fp.cubes...,
+                    properties = main_ds.properties,
+                )
             catch
                 main_ds
             end
         end
         if hrl && isfile(joinpath(local_cubepath, "$batch-HRL", string(cubename, ".zip")))
-            hrl_ds = open_dataset(joinpath(local_cubepath, "$batch-HRL", string(cubename, ".zip")))
+            hrl_ds = open_dataset(
+                joinpath(local_cubepath, "$batch-HRL", string(cubename, ".zip")),
+            )
             for (k, v) in (hrl_ds.cubes)
                 main_ds.cubes[k] = v
             end
@@ -354,7 +464,7 @@ Get the longitude and latitude coordinates of the center of the ARCEME data cube
 function arceme_coordinates(ds)
     trans = Proj.Transformation("EPSG:$(ds.properties["epsg"])", "OGC:84")
     x, y = ds.properties["central_x"], ds.properties["central_y"]
-    lon, lat = round.(trans((x, y)), digits=4)
+    lon, lat = round.(trans((x, y)), digits = 4)
     return lon, lat
 end
 
@@ -380,7 +490,7 @@ end
 
 Compute the listed indices using SpectralIndices.jl. Not working.
 """
-function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2")
+function arceme_spectral(ds, indices::Vector{String}; platform = "sentinel2")
     tmp = if platform == "sentinel2" || platform == "sentinel2a" || platform == "sentinel2b"
         pl = platform == "sentinel2" ? "sentinel2a" : platform
         _compute_indices(ds, indices, pl)
@@ -406,20 +516,20 @@ Compute the radiometric offsets for Sentinel 2 bands to get values at bottom of 
 The default values are valid for data processed from baseline 04.00 (January 2022) onwards.
 The entire Sentinel-2 archive in CDSE has been reprocessed and is now available in baseline 05.xx, with consistent offset.
 """
-boa(band; BOA_ADD_OFFSET=-1000, QUANTIFICATION_VALUE=10000) = (band + BOA_ADD_OFFSET) / QUANTIFICATION_VALUE
+boa(band; BOA_ADD_OFFSET = -1000, QUANTIFICATION_VALUE = 10000) =
+    (band + BOA_ADD_OFFSET) / QUANTIFICATION_VALUE
 
 """
     arceme_rgb(ds)
 
 Compute the RGB composite for the ARCEME data cube dataset `ds`.
 """
-arceme_rgb(ds) =
-    broadcast(ds.B02, ds.B03, ds.B04) do b, g, r
-        # m = typemax(Int16)
-        # RGB(r / m * 4, g / m * 4, b / m * 4)
-        # RGB(min(1.0,r / m *4) , min(1.0,g / m *4) , min(1.0,b / m *4))
-        RGB(clamp(boa(r), 0, 1), clamp(boa(g), 0, 1), clamp(boa(b), 0, 1))
-    end
+arceme_rgb(ds) = broadcast(ds.B02, ds.B03, ds.B04) do b, g, r
+    # m = typemax(Int16)
+    # RGB(r / m * 4, g / m * 4, b / m * 4)
+    # RGB(min(1.0,r / m *4) , min(1.0,g / m *4) , min(1.0,b / m *4))
+    RGB(clamp(boa(r), 0, 1), clamp(boa(g), 0, 1), clamp(boa(b), 0, 1))
+end
 
 """
     arceme_optical_band_fingerprints(ds_d, ds_dhp)
@@ -438,18 +548,37 @@ function arceme_optical_band_fingerprints(ds_d, ds_dhp)
         arceme_bias_corrected_fp(band, ds_d)
     end
     fingerprint_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp, fp_d), banddim)
-    fingerprint_uncor_sparse_d = YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_d), banddim)
+    fingerprint_uncor_sparse_d =
+        YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_d), banddim)
 
     fp_dhp = @showprogress desc = "DHP fingerprint......" map(optical_bands) do band
         arceme_bias_corrected_fp(band, ds_dhp)
     end
     fingerprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
-    fingerprint_uncor_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_dhp), banddim)
+    fingerprint_uncor_sparse_dhp =
+        YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_dhp), banddim)
 
-    fingerprints_d = time_aggregate_fingerprint(fingerprint_sparse_d, eventdate_d, banddim, :time_sentinel_2_l2a)
-    fingerprints_dhp = time_aggregate_fingerprint(fingerprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_2_l2a)
+    fingerprints_d = time_aggregate_fingerprint(
+        fingerprint_sparse_d,
+        eventdate_d,
+        banddim,
+        :time_sentinel_2_l2a,
+    )
+    fingerprints_dhp = time_aggregate_fingerprint(
+        fingerprint_sparse_dhp,
+        eventdate_dhp,
+        banddim,
+        :time_sentinel_2_l2a,
+    )
 
-    Dataset(; fingerprints_d, fingerprints_dhp, fingerprint_sparse_d, fingerprint_sparse_dhp, fingerprint_uncor_sparse_d, fingerprint_uncor_sparse_dhp)
+    Dataset(;
+        fingerprints_d,
+        fingerprints_dhp,
+        fingerprint_sparse_d,
+        fingerprint_sparse_dhp,
+        fingerprint_uncor_sparse_d,
+        fingerprint_uncor_sparse_dhp,
+    )
 end
 
 """
@@ -476,10 +605,25 @@ function arceme_radar_fingerprints(ds_d, ds_dhp)
     end
     fingerprint_sparse_dhp = YAXArrays.concatenatecubes(map(i -> i.fp, fp_dhp), banddim)
 
-    fingerprints_d = time_aggregate_fingerprint(fingerprint_sparse_d, eventdate_d, banddim, :time_sentinel_1_rtc)
-    fingerprints_dhp = time_aggregate_fingerprint(fingerprint_sparse_dhp, eventdate_dhp, banddim, :time_sentinel_1_rtc)
+    fingerprints_d = time_aggregate_fingerprint(
+        fingerprint_sparse_d,
+        eventdate_d,
+        banddim,
+        :time_sentinel_1_rtc,
+    )
+    fingerprints_dhp = time_aggregate_fingerprint(
+        fingerprint_sparse_dhp,
+        eventdate_dhp,
+        banddim,
+        :time_sentinel_1_rtc,
+    )
 
-    Dataset(; fingerprints_d, fingerprints_dhp, fingerprint_sparse_d, fingerprint_sparse_dhp)
+    Dataset(;
+        fingerprints_d,
+        fingerprints_dhp,
+        fingerprint_sparse_d,
+        fingerprint_sparse_dhp,
+    )
 end
 
 
@@ -491,7 +635,11 @@ Merges the optical and radar fingerprints datasets into a single dataset.
 function arceme_merge_fingerprints(optical_fp, radar_fp)
     newbands = DD.Dim{:band}([optical_fp.band.val; radar_fp.band.val])
     newarrays = map((:fingerprints_d, :fingerprints_dhp)) do cubename
-        mergeddata = cat(optical_fp[cubename].data ./ typemax(UInt16), radar_fp[cubename].data, dims=3)
+        mergeddata = cat(
+            optical_fp[cubename].data ./ typemax(UInt16),
+            radar_fp[cubename].data,
+            dims = 3,
+        )
         cubename => YAXArray((radar_fp.lc, radar_fp.Ti, newbands), mergeddata)
     end
     Dataset(; newarrays...)
@@ -514,18 +662,29 @@ function time_aggregate_fingerprint(allbands, eventdate, banddim, timeaxis)
     step_per_year = 6
     ts = Array(DD.dims(allbands, timeaxis))
     data = allbands.data
-    timestep_to_group(t, eventdate, step_per_year) = (clamp(ceil(Int, (t - eventdate).value / (365.25 * 24 * 60 * 60 * 1000) * step_per_year), -step_per_year + 1, step_per_year))
+    timestep_to_group(t, eventdate, step_per_year) = (clamp(
+        ceil(Int, (t - eventdate).value / (365.25 * 24 * 60 * 60 * 1000) * step_per_year),
+        -step_per_year + 1,
+        step_per_year,
+    ))
     groupinds = timestep_to_group.(ts, eventdate, step_per_year)
     fingerprint_timesteps = (-step_per_year+1):(step_per_year)
     res = map(fingerprint_timesteps) do t
         ii = findall(==(t), groupinds)
         isnothing(ii) && return NaN
-        mapslices(data[:, ii, :], dims=2) do sts
+        mapslices(data[:, ii, :], dims = 2) do sts
             all(ismissing, sts) && return NaN
             mean(skipmissing(sts))
         end
     end
-    YAXArray((allbands.lc, DD.Ti((fingerprint_timesteps .- 0.5) ./ step_per_year .* 12), banddim), cat(res..., dims=2))
+    YAXArray(
+        (
+            allbands.lc,
+            DD.Ti((fingerprint_timesteps .- 0.5) ./ step_per_year .* 12),
+            banddim,
+        ),
+        cat(res..., dims = 2),
+    )
 end
 
 """
@@ -535,13 +694,18 @@ For every valid event pair creates and stores a data cubes of a list of precompu
 a shared sigma parameter per land cover class is computed.
 
 """
-function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-DHP-GLOBAL", subset=:)
-    @showprogress pmap(arceme_validpairs(batch=batch)[subset]) do ev
-        ds_pair = arceme_open.(ev, indices=false, batch=batch)
+function arceme_create_indexcubes(;
+    indices_s1 = ["DpRVIVV"],
+    indices_s2 = ["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"],
+    batch = "ARCEME-DC-DHP-GLOBAL",
+    subset = :,
+)
+    @showprogress pmap(arceme_validpairs(batch = batch)[subset]) do ev
+        ds_pair = arceme_open.(ev, indices = false, batch = batch)
         foreach(ds_pair) do ds
             do_s1 = haskey(ds.cubes, :vh)
-            do_s1 && arceme_spectral(ds, indices_s1, platform="sentinel1")
-            arceme_spectral(ds, indices_s2, platform="sentinel2")
+            do_s1 && arceme_spectral(ds, indices_s1, platform = "sentinel1")
+            arceme_spectral(ds, indices_s2, platform = "sentinel2")
             do_s1 && arceme_radar_db(ds)
             arceme_cloudmask_halo(ds)
             arceme_fractions(ds)
@@ -564,20 +728,28 @@ end
 function writeindexcubes(ds, event, output_base, fields_to_save)
     name = arceme_cubename(event)
     indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
-    compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true, showprogress=false, use_dagger=false)
+    compute_to_zarr(
+        indexcube,
+        joinpath(output_base, name),
+        custom_loopranges = (500, 500, 25),
+        overwrite = true,
+        showprogress = false,
+        use_dagger = false,
+    )
     if haskey(ds.cubes, :vv_db)
         cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
-        savedataset(cube2, path=joinpath(output_base, name), append=true)
+        savedataset(cube2, path = joinpath(output_base, name), append = true)
     end
     cube3 = ds[["cloud_fraction", "cloudmask_halo"]]
-    savedataset(cube3, path=joinpath(output_base, name), append=true)
-    isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
+    savedataset(cube3, path = joinpath(output_base, name), append = true)
+    isfile(joinpath(output_base, string(name, ".zip"))) &&
+        rm(joinpath(output_base, string(name, ".zip")))
     zip_dir(joinpath(output_base, "$name.zip"), joinpath(output_base, name))
-    rm(joinpath(output_base, name), recursive=true)
+    rm(joinpath(output_base, name), recursive = true)
 end
 
 # Utility function to zip a directory
-function apply_dirfiles(f, basepath, dir="")
+function apply_dirfiles(f, basepath, dir = "")
     flist = readdir(joinpath(basepath, dir))
     for file in flist
         if isdir(joinpath(basepath, dir, file))
@@ -601,7 +773,12 @@ end
 
 Computes indices for single events (not pairs) and stores them at `joinpath(local_cubepath,\"\$(batch)-INDICES\")`. 
 """
-function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-DHP-GLOBAL")
+function arceme_create_indexcubes(
+    event_list;
+    indices_s1 = ["DpRVIVV"],
+    indices_s2 = ["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"],
+    batch = "ARCEME-DC-DHP-GLOBAL",
+)
     if !isdir(joinpath(local_cubepath, "$(batch)-INDICES"))
         mkdir(joinpath(local_cubepath, "$(batch)-INDICES"))
     end
@@ -609,12 +786,13 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
 
     for event in event_list
         name = arceme_cubename(event)
-        isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
+        isfile(joinpath(output_base, string(name, ".zip"))) &&
+            rm(joinpath(output_base, string(name, ".zip")))
 
-        ds = arceme_open(event, batch=batch, indices=false, hrl=false)
+        ds = arceme_open(event, batch = batch, indices = false, hrl = false)
 
-        arceme_spectral(ds, indices_s1, platform="sentinel1")
-        arceme_spectral(ds, indices_s2, platform="sentinel2")
+        arceme_spectral(ds, indices_s1, platform = "sentinel1")
+        arceme_spectral(ds, indices_s2, platform = "sentinel2")
         arceme_radar_db(ds)
         arceme_cloudmask_halo(ds)
         arceme_fractions(ds)
@@ -631,7 +809,13 @@ end
 
 Computes fingerprints for indices, stratified by `strata` using statistic `fpstat`.
 """
-function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], strata="ESA_LC", fpstat=mean)
+function arceme_index_fingerprints(
+    ds;
+    indices_s1 = ["DpRVIVV", "vv_db", "vh_db"],
+    indices_s2 = ["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"],
+    strata = "ESA_LC",
+    fpstat = mean,
+)
 
     #banddim = DD.Dim{:band}(string.(optical_bands))
     indices_s2 = filter(i -> in(Symbol(i), keys(ds.cubes)), indices_s2) |> collect
@@ -640,21 +824,37 @@ function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"],
     if !isempty(indices_s1)
         indexdim_s1 = DD.Dim{:band_s1}(indices_s1)
         fp_s1 = map(indices_s1) do band
-            arceme_uncorrected_fp(band, ds, timeaxis=:time_sentinel_1_rtc, strata=strata)
+            arceme_uncorrected_fp(band, ds, timeaxis = :time_sentinel_1_rtc, strata = strata)
         end
-        fingerprint_sparse_s1 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s1), indexdim_s1), (; band_s1=length(indices_s1)))
-        s1cubes = (:s1_indices => fingerprint_sparse_s1, :class_fractions => fp_s1[1].class_fractions)
+        fingerprint_sparse_s1 = setchunks(
+            YAXArrays.concatenatecubes(map(i -> i.fp, fp_s1), indexdim_s1),
+            (; band_s1 = length(indices_s1)),
+        )
+        s1cubes = (
+            :s1_indices => fingerprint_sparse_s1,
+            :class_fractions => fp_s1[1].class_fractions,
+        )
     end
     if !isempty(indices_s2)
         indexdim_s2 = DD.Dim{:band_s2}(indices_s2)
 
         fp_s2 = map(indices_s2) do band
-            arceme_bias_corrected_fp(band, ds, strata=strata)
+            arceme_bias_corrected_fp(band, ds, strata = strata)
         end
-        fingerprint_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
-        fingerprint_uncor_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
+        fingerprint_sparse_s2 = setchunks(
+            YAXArrays.concatenatecubes(map(i -> i.fp, fp_s2), indexdim_s2),
+            (; band_s2 = length(indices_s2)),
+        )
+        fingerprint_uncor_sparse_s2 = setchunks(
+            YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_s2), indexdim_s2),
+            (; band_s2 = length(indices_s2)),
+        )
         #fingerprints_s2 = time_aggregate_fingerprint(fingerprint_sparse_s2, eventdate, indexdim_s2, :time_sentinel_2_l2a)
-        s2cubes = (:s2_indices => fingerprint_sparse_s2, :uncorrected_s2_indices => fingerprint_uncor_sparse_s2, :class_fractions => fp_s2[1].class_fractions)
+        s2cubes = (
+            :s2_indices => fingerprint_sparse_s2,
+            :uncorrected_s2_indices => fingerprint_uncor_sparse_s2,
+            :class_fractions => fp_s2[1].class_fractions,
+        )
     end
     Dataset(; s1cubes..., s2cubes...)
 end
@@ -663,7 +863,8 @@ function arceme_fractions(ds)
     c = counter(ds.ESA_LC[time=1].data[:, :])
     npix = length(ds.ESA_LC)
     #Find maximum landcover in both cubes
-    classkeys, classnames = collect(keys(arceme_legends["ESA_LC"])), collect(values(arceme_legends["ESA_LC"]))
+    classkeys, classnames =
+        collect(keys(arceme_legends["ESA_LC"])), collect(values(arceme_legends["ESA_LC"]))
     classax = DD.Dim{:class}(classnames)
     fracs = zeros(Float64, length(classax))
     for (k, v) in c
@@ -672,7 +873,12 @@ function arceme_fractions(ds)
     end
     ds.cubes[:class_fraction] = YAXArray((classax,), fracs)
     ds.axes[:class] = classax
-    sumcl = xmap(ds.cloud_mask ⊘ (:x, :y), ds.SCL ⊘ (:x, :y), inplace=false, output=XOutput(outtype=Float64)) do cl, scl
+    sumcl = xmap(
+        ds.cloud_mask ⊘ (:x, :y),
+        ds.SCL ⊘ (:x, :y),
+        inplace = false,
+        output = XOutput(outtype = Float64),
+    ) do cl, scl
         sum(i -> ARCEMEAnalysis._is_cloud(i...), zip(cl, scl))
     end
     cloudfrac = sumcl[1, 1, :].data ./ length(ds.x) ./ length(ds.y)
@@ -684,22 +890,52 @@ end
 Compute a cloud mask with a 5x5 window halo
 """
 function arceme_cloudmask_halo(d)
-    combined_clouds = xmap(d.cloud_mask, d.SCL, inplace=false, output=XOutput(outtype=UInt8)) do cl, scl
+    combined_clouds = xmap(
+        d.cloud_mask,
+        d.SCL,
+        inplace = false,
+        output = XOutput(outtype = UInt8),
+    ) do cl, scl
         ARCEMEAnalysis._is_clear_or_shadow(cl, scl) + 2 * (cl==3)
     end
-    inwindows = (DAE.InputArray(combined_clouds.data, windows=(DAE.MovingWindow(-1, 1, 5, 1000, (1, 1000)), DAE.MovingWindow(-1, 1, 5, 1000, (1, 1000)), 1:size(combined_clouds, 3))),)
-    outspec = (DAE.create_outwindows((1000, 1000, size(combined_clouds, 3)), chunks=(500, 500, 25)),)
+    inwindows = (
+        DAE.InputArray(
+            combined_clouds.data,
+            windows = (
+                DAE.MovingWindow(-1, 1, 5, 1000, (1, 1000)),
+                DAE.MovingWindow(-1, 1, 5, 1000, (1, 1000)),
+                1:size(combined_clouds, 3),
+            ),
+        ),
+    )
+    outspec = (
+        DAE.create_outwindows(
+            (1000, 1000, size(combined_clouds, 3)),
+            chunks = (500, 500, 25),
+        ),
+    )
     halofunc(x) = any(==(0), x) ? 0 : all(==(1), x) ? 1 : 2
-    op = DAE.GMDWop(inwindows, outspec, DAE.create_userfunction(halofunc, UInt8, is_mutating=false))
-    d.cubes[:cloudmask_halo] = YAXArray(d.cloud_mask.axes, DAE.results_as_diskarrays(op)[1], Dict("legend"=>"0 => Clouds or missing, 1=>clear sky, 2=> clear sky or shadow"))
+    op = DAE.GMDWop(
+        inwindows,
+        outspec,
+        DAE.create_userfunction(halofunc, UInt8, is_mutating = false),
+    )
+    d.cubes[:cloudmask_halo] = YAXArray(
+        d.cloud_mask.axes,
+        DAE.results_as_diskarrays(op)[1],
+        Dict("legend"=>"0 => Clouds or missing, 1=>clear sky, 2=> clear sky or shadow"),
+    )
 end
 
-function arceme_precompute_fingerprints(tmpdir="./fingerprints"; batch="ARCEME-DC-DHP-GLOBAL")
+function arceme_precompute_fingerprints(
+    tmpdir = "./fingerprints";
+    batch = "ARCEME-DC-DHP-GLOBAL",
+)
     @showprogress pmap(Iterators.product(1:2, arceme_validpairs(; batch))) do (iev, ev_p)
         ev = ev_p[iev]
         ds = arceme_open(ev; batch)
         fp = ARCEMEAnalysis.arceme_index_fingerprints(ds)
-        savedataset(fp, path=joinpath(tmpdir, arceme_cubename(ev)), overwrite=true)
+        savedataset(fp, path = joinpath(tmpdir, arceme_cubename(ev)), overwrite = true)
     end
 
     outputzipfile = joinpath(ARCEMEAnalysis.local_cubepath, "$batch-fingerprints.zip")
@@ -713,9 +949,11 @@ include("download.jl")
 include("spatialdebias.jl")
 include("spectral_helpers.jl")
 include("s1_helpers.jl")
-include("hrl_helpers.jl")
+include("hrl/hrl_helpers.jl")
 
 @reexport using .HRL
 
 include("plots/fingerprint_plots.jl")
+include("plots/cube_plots.jl")
+
 end #module
