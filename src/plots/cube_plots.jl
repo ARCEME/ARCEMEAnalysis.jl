@@ -348,6 +348,11 @@ function plot_cpbsb_splines(
     f
 end
 
+function getindcrop(current_event, crop; batch = "ARCEME-DC-8")
+    ds = arceme_open(current_event, batch = batch)
+    cls = ctykeys[findfirst(ctykeys[:, 1] .== crop), 2]
+    indcrop = findall(x -> x == cls, ds.CTY.data[:, :])
+end
 
 function crop_splines(
     current_event,
@@ -357,12 +362,11 @@ function crop_splines(
     batch = "ARCEME-DC-8",
     idx = "kNDVI",
 )
-    ds = arceme_open(current_event, batch = batch)
+    ds = arceme_open(current_event; batch)
     event_date = arceme_eventdate(current_event)
-    r_s2 = getsplines(current_event, batch = batch)
+    r_s2 = getsplines(current_event; batch)
 
-    cls = ctykeys[findfirst(ctykeys[:, 1] .== crop), 2]
-    indcrop = findall(x -> x == cls, ds.CTY.data[:, :])
+    indcrop = getindcrop(current_event, crop; batch)
 
     f = Figure()
     tempo = datetime2unix.(lookup(r_s2.time))
@@ -377,7 +381,7 @@ function crop_splines(
         ylabel = idx,
         xticks = (tick_positions, tick_labels),
     )
-    Random.seed!(42)
+    seed!(42)
     for i in rand(indcrop, nsamples)
         ts = ds[idx].data[i[1], i[2], :]
         mn = minimum(ts[.!isnan.(ts)])
@@ -400,5 +404,5 @@ function crop_splines(
 end
 
 
-export plotlc, plotmceh, piecty, fpfig, getsplines, plot_cpbsb_splines
+export plotlc, plotmceh, piecty, fpfig, getsplines, plot_cpbsb_splines, crop_splines, getindcrop
 end
