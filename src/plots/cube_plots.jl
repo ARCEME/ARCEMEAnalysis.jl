@@ -6,7 +6,7 @@ using Dates, DateFormats
 using ..ARCEMEAnalysis
 using ..ARCEMEAnalysis: local_cubepath, arceme_legends, Event, arceme_open
 using DataStructures: counter, OrderedDict
-using Statistics: mean
+using Statistics: mean, median
 using GeoMakie
 import DimensionalData as DD
 using Random: seed!
@@ -440,6 +440,7 @@ function arceme_pcrop(
     batch = "ARCEME-DC-8",
     savef = true,
     fname = "fig_violin_anova_grape_$(current_event.uid).png",
+    printres = true,
 )
     event_date = arceme_eventdate(current_event)
     cubename = arceme_cubename(current_event)
@@ -521,9 +522,9 @@ function arceme_pcrop(
     # ANOVA
     res = Dict()
     for istat in names(df_anova)[2:7]
-        println(istat)
-        @show res[istat] =
-            OneWayANOVATest(gdf[1][!, Symbol(istat)], gdf[2][!, Symbol(istat)])
+        printres && println(istat)
+        res[istat] = OneWayANOVATest(gdf[1][!, Symbol(istat)], gdf[2][!, Symbol(istat)])
+        printres && println(res[istat])
     end
     return (f, res, data_anova)
 end
