@@ -87,7 +87,7 @@ end
 function plotcty(
     current_event::Event;
     batch = "ARCEME-DC-8",
-    savef = false,
+    savef = true,
     fname = "fig_CTY_$(current_event.uid).png",
 )
     ds = arceme_open(current_event, batch = batch)
@@ -226,6 +226,8 @@ function fpfig(
     idx = "kNDVI",
     mclass = "Annual crop",
     batch = "ARCEME-DC-8",
+    savef = true,
+    fname = "fig_fp_$(class)_$(current_event.uid).png",
 )
     cubename = arceme_cubename(current_event)
     event_date = arceme_eventdate(current_event)
@@ -260,7 +262,7 @@ function fpfig(
                 "$(split(cubename,".")[1])__fp_MCTY.zarr",
             ),
         )
-        scatterlines!(
+        scatter!(
             ax,
             datetime2unix.(tempo_s2),
             mfp_cty.uncorrected_s2_indices[band_s2 = At(idx), class = At(mclass)].data[:],
@@ -268,7 +270,7 @@ function fpfig(
             linewidth = 2,
         )
     end
-    scatterlines!(
+    scatter!(
         ax,
         datetime2unix.(tempo_s2),
         fp_cty.uncorrected_s2_indices[band_s2 = At(idx), class = At(class)].data[:],
@@ -277,6 +279,8 @@ function fpfig(
     )
     # ax.xticks = ([1,n÷2+1,n], string.(Date.(tempo_s2[[1,n÷2+1,n]])))
     fig[2, 1] = Legend(fig, ax, framevisible = false, orientation = :horizontal, nbanks = 1)
+
+    savef && save(fname, fig)
     fig
 end
 
@@ -311,6 +315,8 @@ function plot_cpbsb_splines(
     nmonths = 6,
     random = true,
     ind = [1, 10, 100, 1000],
+    savef = true,
+    fname = "fig_$(idx)_splines_$(crop)_cpbsb_$(current_event.uid).png",
 )
     ds = arceme_open(current_event, batch = batch)
     r_s2 = getsplines(current_event)
@@ -356,6 +362,7 @@ function plot_cpbsb_splines(
         colormap = (:viridis, 0.5),
         label = "Bare soil before crop emergence (days)",
     )
+    savef && save(fname, f)
     f
 end
 
@@ -414,6 +421,118 @@ function crop_splines(
     f
 end
 
+function tsstatsA(xout, ts, mce, mch, tempo)
+    if (ismissing(mce) || ismissing(mch))
+        xout .= missing
+        return nothing
+    end
+    missmask = findall(x -> !ismissing(x) && isfinite(x), ts)
+    ind = tempo[missmask] .> mce .&& tempo[missmask] .< mch
+    mx = maximum(ts[missmask][ind])
+    # tmx = Day(tempo[missmask][ind][ts[missmask][ind].==mx][1] - tempo[1]).value
+    tmx = dayofyear(tempo[missmask][ind][ts[missmask][ind].==mx][1])
+    sts = sum(ts[missmask][ind])
+    xout .= cat(mx, tmx, sts, dims = 1)
+    return nothing
+end
+
+"""
+    
+"""
+function arceme_acrop(
+    current_event,
+    crop;
+    batch = "ARCEME-DC-8",
+    savef = true,
+    fname = "fig_violin_anova_$(crop)_$(current_event.uid).png",
+    printres = true,
+)
+    ds = arceme_open(current_event; batch)
+
+    indcrop = getindcrop(current_event, crop; batch)
+
+    gbsb_labels = ["<35", "35-60", ">60"]
+    gbsb = map(ds.CPBSB) do x
+        (x == 0 || x >= 65500) && return missing
+        x < 35 && return 1
+        (x >= 35 || x < 60) && return 2
+        x >= 60 && return 3
+    end
+
+    mce = map(ds.CPMCE) do x
+        (x == 0 || x >= 65500) && return missing
+        return CubePlots.yydoy2date(x)
+    end
+
+    mch = map(ds.CPMCH) do x
+        (x == 0 || x >= 65500) && return missing
+        return CubePlots.yydoy2date(x)
+    end
+
+    outax = Dim{:mcstats}(["mx", "tmx", "sum"])
+    mcstata = xmap(
+        tsstatsA,
+        ds.kNDVI ⊘ :time_sentinel_2_l2a,
+        mce,
+        mch,
+        output = XOutput(outax, outtype = Union{Missing,Float32}),
+        function_args = (lookup(ds.time_sentinel_2_l2a),),
+    )
+    data_anova = hcat(
+        permutedims(mcstata.data[:, indcrop[indcrop.∈(indBSB,)], 1]),
+        gbsb.data[indcrop[indcrop.∈(indBSB,)]],
+    )
+    df_anova =
+        DataFrame(
+            mx = data_anova[:, 1],
+            tmx = data_anova[:, 2],
+            sumkndvi = data_anova[:, 3],
+            gbsb = data_anova[:, 4],
+        ) |> (df -> dropmissing!(df))
+    gdf = groupby(df_anova, :gbsb)
+    means = gdf |> (gdf -> combine(gdf, :mx => mean, :tmx => mean, :sumkndvi => mean))
+    ylabs = ["max(kNDVI)", "DOY | max(kNDVI)", "∑(kNDVI)"]
+
+    f = Figure(size = (400, 800))
+    for i = 1:3
+        ax = Axis(
+            f[i, 1],
+            xlabel = "Bare Soil Before Main Crop emergence (Days)",
+            xticks = (1:nrow(means), gbsb_labels[1:nrow(means)]),
+            ylabel = ylabs[i],
+        )
+        violin!(ax, df_anova[:, 4], df_anova[:, i], scale = :count, show_median = true)
+        for j = 1:nrow(means)
+            hlines!(
+                ax,
+                means[j, i+1],
+                xmin = (j - 1) / nrow(means),
+                xmax = j / (nrow(means)),
+                color = :grey,
+            )
+        end
+        i < 3 && hidexdecorations!(ax, grid = false)
+    end
+    Legend(
+        f[4, 1],
+        [
+            LineElement(color = :black, linestyle = nothing),
+            LineElement(color = :grey, linestyle = nothing),
+        ],
+        ["Median", "Mean"],
+        orientation = :horizontal,
+    )
+    f
+    savef && save(fname, f)
+    res = Dict()
+    for istat in names(df_anova)[1:3]
+        printres && println(istat)
+        res[istat] = OneWayANOVATest(gdf[1][!, Symbol(istat)], gdf[2][!, Symbol(istat)])
+        printres && println(res[istat])
+    end
+    return (f, res, data_anova)
+end
+
 function tsstatsP(xout, ts, tempo)
     event_date = tempo[length(tempo)÷2+1]
     missmask = findall(x -> !ismissing(x) && isfinite(x), ts)
@@ -430,20 +549,21 @@ function tsstatsP(xout, ts, tempo)
     xout .= cat(avr, mx1, tmx1, sts1, mx2, tmx2, sts2, dims = 1)
     return nothing
 end
+
+
 function groupwinterkndvi(x, med)
     x < med && return 1
     x >= med && return 2
 end
+
 function arceme_pcrop(
     current_event,
     crop;
     batch = "ARCEME-DC-8",
     savef = true,
-    fname = "fig_violin_anova_grape_$(current_event.uid).png",
+    fname = "fig_violin_anova_$(crop)_$(current_event.uid).png",
     printres = true,
 )
-    event_date = arceme_eventdate(current_event)
-    cubename = arceme_cubename(current_event)
     ds = arceme_open(current_event; batch)
     outax = Dim{:mcstats}(["avr", "mx1", "tmx1", "sum1", "mx2", "tmx2", "sum2"])
     grapestata = xmap(
@@ -529,6 +649,90 @@ function arceme_pcrop(
     return (f, res, data_anova)
 end
 
+"""
+`plot_ts(idx::CartesianIndex, current_event::Event; layer="kNDVI")`
+
+plot time series.
+return (f, tmp1, tmp_rm, sp)
+"""
+function plot_ts(idx, current_event; layer = "kNDVI", batch = "ARCEME-DC-8")
+    ds = arceme_open(current_event, batch = batch)
+    tempo = lookup(ds.time_sentinel_2_l2a)
+    dayssincestart = datetime2julian.(tempo) .- datetime2julian(tempo[1])
+    tmp = ds[layer].data[idx[1], idx[2], :]
+    tick_positions =
+        datetime2julian.((event_date-Year(1)):Month(6):(event_date+Year(1))) .-
+        datetime2julian(tempo[1])  # Convert dates to Unix time (positions)
+    tick_labels = [
+        "$(Dates.format(t, "yyyy-mm-dd") )" for
+        t = (event_date-Year(1)):Month(6):(event_date+Year(1))
+    ]
+    f = Figure()
+    a = Axis(f[1, 1], xticks = (tick_positions, tick_labels))
+    p = scatter!(a, dayssincestart, tmp, label = "Cloud filtered")
+    missmask = findall(x -> !ismissing(x) && isfinite(x), tmp)
+    # flag jumps
+    indflag = findall(
+        broadcast(
+            (x, y) -> x > 0.5 && y <= 20,
+            diff(tmp[missmask]),
+            diff(dayssincestart[missmask]),
+        ),
+    )
+    deleteat!(missmask, indflag .+ 1)
+    # scatterlines!(a, dayssincestart[missmask], tmp[missmask], label = "Jump filtered")
+    # linear interpolation 
+    tmp1 = fill(NaN, length(tmp))
+    tmp1[missmask] .= tmp[missmask]
+    nodes = (dayssincestart[missmask],)
+    itp = interpolate(nodes, tmp[missmask], Gridded(Interpolations.Linear()))
+    if missmask[1] > 1
+        tmp1[1:(missmask[1]-1)] .= tmp[missmask[1]]
+    end
+    if missmask[end] < length(dayssincestart)
+        tmp1[(missmask[end]+1):end] .= tmp[missmask[end]]
+    end
+    tmp1[missmask[1]:missmask[end]] = itp(dayssincestart[missmask[1]:missmask[end]])
+
+    scatterlines!(
+        a,
+        dayssincestart,
+        tmp1,
+        color = Makie.wong_colors()[1],
+        markersize = 5,
+        label = "Linear interpolation",
+    )
+    f
+    # # 2. SavitzkyGolay filter 
+    # tmp_sg1 = savitzky_golay(tmp1, 7, 2)
+    # lines!(a, dayssincestart, tmp_sg1.y, label = "Savitzky–Golay w=3, o=1")
+    # # tmp_sg2 = savitzky_golay(tmp_sg1.y, 5, 3)
+    # # lines!(dayssincestart, tmp_sg2.y, label = "Savitzky–Golay w=5, o=3")
+    # # tmp_sg3 = savitzky_golay(tmp_sg2.y, 7, 2)
+    # # lines!(dayssincestart, tmp_sg3.y, label = "Savitzky–Golay w=7, o=5")
+    # # tmp_sg4 = savitzky_golay(tmp_sg3.y, 9, 6)
+    # # lines!(dayssincestart, tmp_sg4.y, label = "Savitzky–Golay w=9, o=6")
+    # f
+    # # the succesive iterations don't do anything! Because of the linear interpolation, I suppose?
+    # # Maybe I should use a rolling mean before
+
+    # rolling mean
+    tmp_rm = running(mean, tmp1, 5)
+    lines!(
+        a,
+        dayssincestart[1:end-2],
+        tmp_rm[3:end],
+        color = Makie.wong_colors()[2],
+        label = "Rolling mean w=5",
+    )
+    r_s2 = CubePlots.getsplines(current_event)
+    sp = r_s2[band_s2 = At(layer)].data[:, idx[1], idx[2], 1]
+    lines!(a, sp, color = Makie.wong_colors()[3], label = "Spline 19 knots")
+    axislegend(a)
+    f
+    return (f, tmp1, tmp_rm, sp)
+end
+
 export plotlc,
     plotcty,
     plotmceh,
@@ -538,5 +742,6 @@ export plotlc,
     plot_cpbsb_splines,
     crop_splines,
     getindcrop,
-    arceme_pcrop
+    arceme_pcrop,
+    plot_ts
 end
