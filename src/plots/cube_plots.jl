@@ -10,6 +10,7 @@ using Statistics: mean
 using GeoMakie
 import DimensionalData as DD
 using Random: seed!
+using DataFrames
 
 ESA_LC_colormap = [
     (color = "#006400", alpha = 255, value = 10, label = "Tree cover"),
@@ -38,7 +39,14 @@ clc_clrs = [
     colorant"#fae6a0",
 ]
 
-cty_clrs = cgrad(:batlowS, 18, categorical = true)
+cty_clrs = cgrad(
+    vcat(
+        cgrad(:lipariS, 14, categorical = true).colors.colors,
+        cgrad(:bamakoS, 4, categorical = true).colors.colors,
+    ),
+    18,
+    categorical = true,
+)
 
 ctykeys = hcat(
     values(arceme_legends["CTY"]) |> collect,
@@ -83,21 +91,22 @@ function plotcty(
     fname = "fig_CTY_$(current_event.uid).png",
 )
     ds = arceme_open(current_event, batch = batch)
+    cty = map(ARCEMEAnalysis.HRL.ctykeymap, ds.CTY)
     f, ax, p = image(
-        ds.CTY,
-        colormap = cgrad(clc_clrs; categorical = true),
-        colorrange = (2, 20),
-        lclip = :white,
-        hclip = :white,
+        cty,
+        colormap = cgrad(cty_clrs; categorical = true),
+        colorrange = (1, 18),
+        # lowclip = :white,
+        highclip = :white,
         axis = (title = "$(current_event.uid) - Main Crop Type", aspect = DataAspect()),
     )
     Colorbar(
         f[1, 2],
-        colormap = cgrad(clc_clrs; categorical = true),
-        colorrange = (2, 20),
-        lclip = :white,
-        hclip = :white,
-        ticks = (getticks(1, 17), [k for k in ctykeys[2:18, 1]]),
+        colormap = cgrad(cty_clrs; categorical = true),
+        colorrange = (1, 18),
+        # lowclip = :white,
+        highclip = :white,
+        ticks = (getticks(1, 18), [k for k in ctykeys[1:18, 1]]),
     )
     savef && save(fname, f)
     f
@@ -143,7 +152,6 @@ function plotmceh(
         ylabel = "Year decimal",
     )
     cty = ARCEMEAnalysis.HRL.ctykeymap.(ds.CTY.data[:])[.!(ismissing.(mce))]
-    clrs = cgrad(:lipariS, 14, categorical = true)
     for i = 1:14
         hist!(
             ax,
@@ -151,7 +159,7 @@ function plotmceh(
             scale_to = -0.5,
             offset = i,
             direction = :x,
-            color = clrs[i],
+            color = cty_clrs.colors.colors[i],
             label = "$i: $(ctykeys[i,1])",
         )
         hist!(
@@ -160,7 +168,7 @@ function plotmceh(
             scale_to = 0.5,
             offset = i,
             direction = :x,
-            color = clrs[i],
+            color = cty_clrs.colors.colors[i],
         )
     end
     ax.xticks = 1:14
@@ -228,13 +236,7 @@ function fpfig(
             "$(split(cubename,".")[1])__fp_CTY.zarr",
         ),
     )
-    mfp_cty = open_dataset(
-        joinpath(
-            ARCEMEAnalysis.local_cubepath,
-            "$(batch)-fingerprints",
-            "$(split(cubename,".")[1])__fp_MCTY.zarr",
-        ),
-    )
+
     fig = Figure()
     tempo_s2 = lookup(fp_cty.time_sentinel_2_l2a)
     tick_positions = datetime2unix.((event_date-Year(1)):Month(4):(event_date+Year(1)))  # Convert dates to Unix time (positions)
@@ -250,13 +252,22 @@ function fpfig(
         ylabel = idx,
         xticks = (tick_positions, tick_labels),
     )
-    scatterlines!(
-        ax,
-        datetime2unix.(tempo_s2),
-        mfp_cty.uncorrected_s2_indices[band_s2 = At(idx), class = At(mclass)].data[:],
-        label = "$(mclass) - $idx",
-        linewidth = 2,
-    )
+    if !isnothing(mclass)
+        mfp_cty = open_dataset(
+            joinpath(
+                ARCEMEAnalysis.local_cubepath,
+                "$(batch)-fingerprints",
+                "$(split(cubename,".")[1])__fp_MCTY.zarr",
+            ),
+        )
+        scatterlines!(
+            ax,
+            datetime2unix.(tempo_s2),
+            mfp_cty.uncorrected_s2_indices[band_s2 = At(idx), class = At(mclass)].data[:],
+            label = "$(mclass) - $idx",
+            linewidth = 2,
+        )
+    end
     scatterlines!(
         ax,
         datetime2unix.(tempo_s2),
@@ -403,6 +414,128 @@ function crop_splines(
     f
 end
 
+function tsstatsP(xout, ts, tempo)
+    event_date = tempo[length(tempo)÷2+1]
+    missmask = findall(x -> !ismissing(x) && isfinite(x), ts)
+    indWinter = month.(tempo[missmask]) .∈ ([1, 2, 11, 12],)
+    indGrowing1 = month.(tempo[missmask]) .∈ (3:10,) .&& tempo[missmask] .< event_date
+    indGrowing2 = month.(tempo[missmask]) .∈ (3:10,) .&& tempo[missmask] .>= event_date
+    avr = mean(ts[missmask][indWinter])
+    mx1 = maximum(ts[missmask][indGrowing1])
+    tmx1 = dayofyear(tempo[missmask][indGrowing1][ts[missmask][indGrowing1].==mx1][1])
+    sts1 = sum(ts[missmask][indGrowing1])
+    mx2 = maximum(ts[missmask][indGrowing2])
+    tmx2 = dayofyear(tempo[missmask][indGrowing2][ts[missmask][indGrowing2].==mx2][1])
+    sts2 = sum(ts[missmask][indGrowing2])
+    xout .= cat(avr, mx1, tmx1, sts1, mx2, tmx2, sts2, dims = 1)
+    return nothing
+end
+function groupwinterkndvi(x, med)
+    x < med && return 1
+    x >= med && return 2
+end
+function arceme_pcrop(
+    current_event,
+    crop;
+    batch = "ARCEME-DC-8",
+    savef = true,
+    fname = "fig_violin_anova_grape_$(current_event.uid).png",
+)
+    event_date = arceme_eventdate(current_event)
+    cubename = arceme_cubename(current_event)
+    ds = arceme_open(current_event; batch)
+    outax = Dim{:mcstats}(["avr", "mx1", "tmx1", "sum1", "mx2", "tmx2", "sum2"])
+    grapestata = xmap(
+        tsstatsP,
+        ds.kNDVI ⊘ :time_sentinel_2_l2a,
+        output = XOutput(outax, outtype = Union{Missing,Float32}),
+        function_args = (lookup(ds.time_sentinel_2_l2a),),
+    )
+    indcrop = CubePlots.getindcrop(current_event, crop, batch = "ARCEME-DC-6")
+    data_anova = permutedims(grapestata.data[:, indcrop, 1])
+    df_anova =
+        DataFrame(
+            avr = data_anova[:, 1],
+            mx1 = data_anova[:, 2],
+            tmx1 = data_anova[:, 3],
+            sumkndvi1 = data_anova[:, 4],
+            mx2 = data_anova[:, 5],
+            tmx2 = data_anova[:, 6],
+            sumkndvi2 = data_anova[:, 7],
+        ) |> (df -> dropmissing!(df))
+    med = median(df_anova.avr) # => balanced samples
+    gwinter_labels = ["< median", ">= median"]
+    transform!(df_anova, :avr => ByRow(x -> groupwinterkndvi(x, med)) => :gwinter)
+    gdf = groupby(df_anova, :gwinter)
+    # compute mean over DJF
+    means =
+        gdf |> (
+            gdf -> combine(
+                gdf,
+                :mx1 => mean,
+                :tmx1 => mean,
+                :sumkndvi1 => mean,
+                :mx2 => mean,
+                :tmx2 => mean,
+                :sumkndvi2 => mean,
+            )
+        )
+    ylabs = [
+        "max(kNDVI) | Year 1",
+        "DOY | max(kNDVI) | Year 1",
+        "∑(kNDVI) | Year 1",
+        "max(kNDVI) | Year 2",
+        "DOY | max(kNDVI) | Year 2",
+        "∑(kNDVI) | Year 2",
+    ]
+    f = Figure(size = (600, 800))
+    for i = 1:6
+        ax = Axis(
+            f[i > 3 ? i - 3 : i, i > 3 ? 2 : 1],
+            xlabel = "Average winter kNDVI",
+            xticks = (1:nrow(means), gwinter_labels[1:nrow(means)]),
+            ylabel = ylabs[i],
+        )
+        violin!(ax, df_anova[:, 8], df_anova[:, i+1], scale = :count, show_median = true)
+        for j = 1:nrow(means)
+            hlines!(
+                ax,
+                means[j, i+1],
+                xmin = (j - 1) / nrow(means),
+                xmax = j / (nrow(means)),
+                color = :grey,
+            )
+        end
+        !(i ∈ [3, 6]) && hidexdecorations!(ax, grid = false)
+    end
+    Legend(
+        f[4, 1:2],
+        [
+            LineElement(color = :black, linestyle = nothing),
+            LineElement(color = :grey, linestyle = nothing),
+        ],
+        ["Median", "Mean"],
+        orientation = :horizontal,
+    )
+    savef && save(fname, f)
+    # ANOVA
+    res = Dict()
+    for istat in names(df_anova)[2:7]
+        println(istat)
+        @show res[istat] =
+            OneWayANOVATest(gdf[1][!, Symbol(istat)], gdf[2][!, Symbol(istat)])
+    end
+    return (f, res, data_anova)
+end
 
-export plotlc, plotmceh, piecty, fpfig, getsplines, plot_cpbsb_splines, crop_splines, getindcrop
+export plotlc,
+    plotcty,
+    plotmceh,
+    piecty,
+    fpfig,
+    getsplines,
+    plot_cpbsb_splines,
+    crop_splines,
+    getindcrop,
+    arceme_pcrop
 end
