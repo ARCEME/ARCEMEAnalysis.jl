@@ -74,6 +74,7 @@ function plotlc(
         # label = "Land cover",
         axis = (title = "$(current_event.uid) - Land Cover", aspect = DataAspect()),
     )
+    hidedecorations!(ax)
     Colorbar(
         f[1, 2],
         colormap = cgrad(clc_clrs; categorical = true),
@@ -100,6 +101,7 @@ function plotcty(
         highclip = :white,
         axis = (title = "$(current_event.uid) - Main Crop Type", aspect = DataAspect()),
     )
+    hidedecorations!(ax)
     Colorbar(
         f[1, 2],
         colormap = cgrad(cty_clrs; categorical = true),
@@ -262,7 +264,7 @@ function fpfig(
                 "$(split(cubename,".")[1])__fp_MCTY.zarr",
             ),
         )
-        scatter!(
+        scatterlines!(
             ax,
             datetime2unix.(tempo_s2),
             mfp_cty.uncorrected_s2_indices[band_s2 = At(idx), class = At(mclass)].data[:],
@@ -270,7 +272,7 @@ function fpfig(
             linewidth = 2,
         )
     end
-    scatter!(
+    scatterlines!(
         ax,
         datetime2unix.(tempo_s2),
         fp_cty.uncorrected_s2_indices[band_s2 = At(idx), class = At(class)].data[:],
@@ -339,7 +341,7 @@ function plot_cpbsb_splines(
         xticks = (tick_positions, tick_labels),
     )
     if random
-        Random.seed!(42)
+        seed!(42)
         cind = rand(indcrop, nsamples)
     else
         cind = indcrop[ind]
