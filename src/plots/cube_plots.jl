@@ -11,6 +11,9 @@ using GeoMakie
 import DimensionalData as DD
 using Random: seed!
 using DataFrames
+using Interpolations
+using HypothesisTests: OneWayANOVATest
+
 
 ESA_LC_colormap = [
     (color = "#006400", alpha = 255, value = 10, label = "Tree cover"),
@@ -98,7 +101,7 @@ function plotcty(
         colormap = cgrad(cty_clrs; categorical = true),
         colorrange = (1, 18),
         # lowclip = :white,
-        highclip = :white,
+        highclip = :transparent,
         axis = (title = "$(current_event.uid) - Main Crop Type", aspect = DataAspect()),
     )
     hidedecorations!(ax)
@@ -107,7 +110,7 @@ function plotcty(
         colormap = cgrad(cty_clrs; categorical = true),
         colorrange = (1, 18),
         # lowclip = :white,
-        highclip = :white,
+        # highclip = :white,
         ticks = (getticks(1, 18), [k for k in ctykeys[1:18, 1]]),
     )
     savef && save(fname, f)
@@ -428,11 +431,23 @@ function tsstatsA(xout, ts, mce, mch, tempo)
         xout .= missing
         return nothing
     end
-    missmask = findall(x -> !ismissing(x) && isfinite(x), ts)
+    (missmask, ts) = interpolate_ts(ts, tempo)
     ind = tempo[missmask] .> mce .&& tempo[missmask] .< mch
-    mx = maximum(ts[missmask][ind])
+    if !any(ind)
+        xout .= missing
+        return nothing
+    end
+    mx = try
+        maximum(ts[missmask][ind])
+    catch
+        @show mce
+        @show mch
+        @show tempo[missmask]
+    end
     # tmx = Day(tempo[missmask][ind][ts[missmask][ind].==mx][1] - tempo[1]).value
     tmx = dayofyear(tempo[missmask][ind][ts[missmask][ind].==mx][1])
+    # need to interpolate over tempo to have a comparable basis
+
     sts = sum(ts[missmask][ind])
     xout .= cat(mx, tmx, sts, dims = 1)
     return nothing
@@ -448,10 +463,16 @@ function arceme_acrop(
     savef = true,
     fname = "fig_violin_anova_$(crop)_$(current_event.uid).png",
     printres = true,
+    io = stdout,
 )
     ds = arceme_open(current_event; batch)
 
     indcrop = getindcrop(current_event, crop; batch)
+    indBSB = findall(x -> x > 0 && x < 65000, ds.CPBSB.data[:, :])
+    if isempty(indcrop[indcrop.∈(indBSB,)])
+        println(io, "No BSB data for $crop ANOVA")
+        return (nothing, nothing, nothing)
+    end
 
     gbsb_labels = ["<35", "35-60", ">60"]
     gbsb = map(ds.CPBSB) do x
@@ -527,17 +548,21 @@ function arceme_acrop(
     f
     savef && save(fname, f)
     res = Dict()
-    for istat in names(df_anova)[1:3]
-        printres && println(istat)
-        res[istat] = OneWayANOVATest(gdf[1][!, Symbol(istat)], gdf[2][!, Symbol(istat)])
-        printres && println(res[istat])
+    for istat = 1:3
+        printres && println(io, "$(istat). $(names(df_anova)[istat]): $(ylabs[istat])\n")
+        res[names(df_anova)[istat]] = OneWayANOVATest(
+            gdf[1][!, Symbol(names(df_anova)[istat])],
+            gdf[2][!, Symbol(names(df_anova)[istat])],
+        )
+        printres && println(io, res[names(df_anova)[istat]])
     end
     return (f, res, data_anova)
 end
 
 function tsstatsP(xout, ts, tempo)
     event_date = tempo[length(tempo)÷2+1]
-    missmask = findall(x -> !ismissing(x) && isfinite(x), ts)
+    (missmask, ts) = interpolate_ts(ts, tempo)
+    # missmask = findall(x -> !ismissing(x) && isfinite(x), ts)
     indWinter = month.(tempo[missmask]) .∈ ([1, 2, 11, 12],)
     indGrowing1 = month.(tempo[missmask]) .∈ (3:10,) .&& tempo[missmask] .< event_date
     indGrowing2 = month.(tempo[missmask]) .∈ (3:10,) .&& tempo[missmask] .>= event_date
@@ -561,10 +586,11 @@ end
 function arceme_pcrop(
     current_event,
     crop;
-    batch = "ARCEME-DC-8",
+    batch = "ARCEME-DC-6",
     savef = true,
     fname = "fig_violin_anova_$(crop)_$(current_event.uid).png",
     printres = true,
+    io = stdout,
 )
     ds = arceme_open(current_event; batch)
     outax = Dim{:mcstats}(["avr", "mx1", "tmx1", "sum1", "mx2", "tmx2", "sum2"])
@@ -574,7 +600,7 @@ function arceme_pcrop(
         output = XOutput(outax, outtype = Union{Missing,Float32}),
         function_args = (lookup(ds.time_sentinel_2_l2a),),
     )
-    indcrop = CubePlots.getindcrop(current_event, crop, batch = "ARCEME-DC-6")
+    indcrop = CubePlots.getindcrop(current_event, crop; batch)
     data_anova = permutedims(grapestata.data[:, indcrop, 1])
     df_anova =
         DataFrame(
@@ -644,11 +670,38 @@ function arceme_pcrop(
     # ANOVA
     res = Dict()
     for istat in names(df_anova)[2:7]
-        printres && println(istat)
+        printres && println(io, istat)
         res[istat] = OneWayANOVATest(gdf[1][!, Symbol(istat)], gdf[2][!, Symbol(istat)])
-        printres && println(res[istat])
+        printres && println(io, res[istat])
     end
     return (f, res, data_anova)
+end
+
+function interpolate_ts(tmp, tempo)
+    dayssincestart = datetime2julian.(tempo) .- datetime2julian(tempo[1])
+    missmask = findall(x -> !ismissing(x) && isfinite(x), tmp)
+    # flag jumps
+    indflag = findall(
+        broadcast(
+            (x, y) -> x > 0.5 && y <= 20,
+            diff(tmp[missmask]),
+            diff(dayssincestart[missmask]),
+        ),
+    )
+    deleteat!(missmask, indflag .+ 1)
+    # linear interpolation 
+    tmp1 = fill(NaN, length(tmp))
+    tmp1[missmask] .= tmp[missmask]
+    nodes = (dayssincestart[missmask],)
+    itp = interpolate(nodes, tmp[missmask], Gridded(Interpolations.Linear()))
+    if missmask[1] > 1
+        tmp1[1:(missmask[1]-1)] .= tmp[missmask[1]]
+    end
+    if missmask[end] < length(dayssincestart)
+        tmp1[(missmask[end]+1):end] .= tmp[missmask[end]]
+    end
+    tmp1[missmask[1]:missmask[end]] = itp(dayssincestart[missmask[1]:missmask[end]])
+    return (missmask, tmp1)
 end
 
 """
@@ -659,6 +712,7 @@ return (f, tmp1, tmp_rm, sp)
 """
 function plot_ts(idx, current_event; layer = "kNDVI", batch = "ARCEME-DC-8")
     ds = arceme_open(current_event, batch = batch)
+    event_date = arceme_eventdate(current_event)
     tempo = lookup(ds.time_sentinel_2_l2a)
     dayssincestart = datetime2julian.(tempo) .- datetime2julian(tempo[1])
     tmp = ds[layer].data[idx[1], idx[2], :]
@@ -744,6 +798,7 @@ export plotlc,
     plot_cpbsb_splines,
     crop_splines,
     getindcrop,
+    arceme_acrop,
     arceme_pcrop,
     plot_ts
 end
