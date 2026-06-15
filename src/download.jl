@@ -32,7 +32,7 @@ end
 
 const local_cubepath = @load_preference("arceme_localpath")
 
-function arceme_download_batch(batch="ARCEME-DC-6")
+function arceme_download_batch(batch="ARCEME-DC-DHP-GLOBAL"; subset=nothing)
     if local_cubepath === nothing
         error("You need to set the local cube path first. Please run `arceme_localpath(path)` first.")
     end
@@ -44,11 +44,16 @@ function arceme_download_batch(batch="ARCEME-DC-6")
     aresp = HTTP.get("$httpstore/$batch/",query=Dict("format"=>"json","delimiter"=>"/"))
     allarrays = map(i->strip(i["subdir"],'/'),JSON.parse(aresp.body))
 
+    if subset !== nothing
+        filter!(in(subset), allarrays)
+    end
+
     @showprogress for current_cube in allarrays
         lresp = HTTP.get("$httpstore/$batch/",query=Dict("prefix"=>current_cube))
         files_in_cube = split(StringView(lresp.body),"\n")
 
         outfilename = joinpath(local_cubepath,batch,string(current_cube,".zip"))
+        isfile(outfilename) && rm(outfilename)
         ZipWriter(outfilename) do w
             for f in files_in_cube
                 resp = HTTP.get("$httpstore/$batch/$f");

@@ -26,7 +26,7 @@ function inner_compute_indices_s1(bands, consts, indices_tuple)
     listofindices(indices_tuple, allparams)
 end
 
-function _compute_indices(ds,indices,platform)
+function _compute_indices(ds, indices, platform; showprog=true)
     indices_tuple = ((SI.indices[k] for k in indices)...,)
 
     allvars = mapreduce(r->Set(string.(SI._band_names(r))),union!,indices_tuple)
@@ -76,7 +76,7 @@ function estimate_sigma_per_lc(ds;bands=(:B08,:B04))
     iw2 = DAE.InputArray(ds.ESA_LC[time=1].data)
     ow = DAE.create_outwindows((si..., 12), windows=(fill.(1, si)..., [1:12]))
     op = DAE.GMDWop((iw1, iw2), (ow,), f)
-    res = DAE.compute(DAE.results_as_diskarrays(op)[1])
+    res = DAE.compute(DAE.results_as_diskarrays(op)[1], showprogress=false)
     res[1, 1, 1, :]
 end
 

@@ -88,6 +88,8 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
 
     classax = classaxis(strata, ncl)
 
+    abundance = counter(lccube)
+
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
         fp_uncorrected=YAXArray((classax, timdim), fp[:, 3, :]),
@@ -95,6 +97,7 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
         fp_clouded_expected=YAXArray((classax, timdim), fp[:, 2, :]),
         params=pars,
         smooth_matrix=fitmat,
+        class_fractions=YAXArray((classax,), [abundance[i] for i in 1:ncl])
     )
     
 end

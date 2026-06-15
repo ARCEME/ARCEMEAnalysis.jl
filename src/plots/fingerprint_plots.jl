@@ -41,7 +41,7 @@ pairnow = arceme_validpairs()[4]
 function most_common_class(pairnow)
     ds1, ds2 = arceme_open.(pairnow)
     #Find maximum landcover in both cubes
-    classfrac1, classfrac2 = (ds1.class_fraction[:], ds2.class_fraction[:])
+    classfrac1, classfrac2 = (ds1.class_fractions[:], ds2.class_fractions[:])
     (_, i1), (_, i2) = findmax.((classfrac1, classfrac2))
     if classfrac1[i1] * classfrac2[i1] > classfrac1[i2] * classfrac2[i2]
         ds1.class.val[i1]
@@ -91,7 +91,7 @@ function open_plot_data(ev, class; strata="ESA_LC")
         dataplots[band] = pairwise_without_missings(x_s1, s1[band_s1=DD.At(band)].data[:])
     end
 
-    classfracs = ds.class_fraction.data[:]
+    classfracs = ds.class_fractions.data[:]
     sfracs = sortperm(classfracs, rev=true)
     strs = map(sfracs[1:3]) do ifrac
         string(collect(values(arceme_legends[strata]))[ifrac], " => ", round(classfracs[ifrac] * 100), "%")
@@ -201,7 +201,7 @@ Creates an RGB image highlighting on a cloud-free time step with high NDVI for a
 """
 function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, class=nothing, strata="ESA_LC")
     if class === nothing
-        classfrac = ds.class_fraction.data[:]
+        classfrac = ds.class_fractions.data[:]
         _, iclass = findmax(classfrac)
         class = ds.class.val[iclass]
     end
