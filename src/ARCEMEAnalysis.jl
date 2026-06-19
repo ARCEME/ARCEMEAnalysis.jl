@@ -13,6 +13,7 @@ using SpectralIndices: compute_index, SpectralIndices
 import Proj
 import SpectralIndices as SI
 import GeoJSON
+import Distributed: nprocs, pmap
 
 function __init__()
     #Extend SpectralIndices band definitions with S1 bands
@@ -131,7 +132,7 @@ export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_ev
     arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
     time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
     arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint, arceme_fractions,
-    arceme_legends
+    arceme_legends, arceme_cloudmask_halo
 
 """
     _arceme_cubenames(;batch="6")
@@ -304,7 +305,7 @@ function arceme_open(cubename; batch="ARCEME-DC-DHP-GLOBAL", indices=true, trylo
         if fingerprint
             try
                 ds_fp = arceme_open_fingerprint(cubename; batch)
-                main_ds = Dataset(; main_ds.cubes..., ds_fp.cubes...)
+                main_ds = Dataset(; main_ds.cubes..., ds_fp.cubes..., properties=main_ds.properties)
             catch
                 main_ds
             end
@@ -395,7 +396,7 @@ function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2")
 end
 
 _is_cloud(cl, scl) = (cl > 0 || (scl in (0, 1, 3, 7, 8, 9, 10, 11)))
-
+_is_clear_or_shadow(cl, scl) = !(cl in (1, 2) || (scl in (0, 1, 3, 7, 8, 9, 10, 11)))
 
 
 """
@@ -536,13 +537,14 @@ a shared sigma parameter per land cover class is computed.
 """
 function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-DHP-GLOBAL", subset=:)
 
-    @showprogress for ev in arceme_validpairs(batch=batch)[subset]
+    @showprogress pmap(arceme_validpairs(batch=batch)[subset]) do ev
         ds_pair = arceme_open.(ev, indices=false, batch=batch)
         foreach(ds_pair) do ds
             do_s1 = haskey(ds.cubes, :vh)
             do_s1 && arceme_spectral(ds, indices_s1, platform="sentinel1")
             arceme_spectral(ds, indices_s2, platform="sentinel2")
             do_s1 && arceme_radar_db(ds)
+            arceme_cloudmask_halo(ds)
             arceme_fractions(ds)
         end
         ARCEMEAnalysis.arceme_kndvi_pair(ds_pair...)
@@ -557,6 +559,7 @@ function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", 
             writeindexcubes(ds, event, output_base, fields_to_save)
         end
     end
+    nothing
 end
 
 function writeindexcubes(ds, event, output_base, fields_to_save)
@@ -567,7 +570,7 @@ function writeindexcubes(ds, event, output_base, fields_to_save)
         cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
         savedataset(cube2, path=joinpath(output_base, name), append=true)
     end
-    cube3 = ds[["cloud_fraction", "lc_fraction"]]
+    cube3 = ds[["cloud_fraction", "cloudmask_halo"]]
     savedataset(cube3, path=joinpath(output_base, name), append=true)
     isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
     zip_dir(joinpath(output_base, "$name.zip"), joinpath(output_base, name))
@@ -614,6 +617,7 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
         arceme_spectral(ds, indices_s1, platform="sentinel1")
         arceme_spectral(ds, indices_s2, platform="sentinel2")
         arceme_radar_db(ds)
+        arceme_cloudmask_halo(ds)
         arceme_fractions(ds)
         arceme_kndvi(ds)
 
@@ -661,20 +665,34 @@ function arceme_fractions(ds)
     npix = length(ds.ESA_LC)
     #Find maximum landcover in both cubes
     classkeys, classnames = collect(keys(arceme_legends["ESA_LC"])), collect(values(arceme_legends["ESA_LC"]))
-    classax = DD.Dim{:lc}(classnames)
+    classax = DD.Dim{:class}(classnames)
     fracs = zeros(Float64, length(classax))
     for (k, v) in c
         iclass = findfirst(==(k), classkeys)
         fracs[iclass] = v / npix
     end
-    ds.cubes[:lc_fraction] = YAXArray((classax,), fracs)
-    ds.axes[:lc] = classax
+    ds.cubes[:class_fraction] = YAXArray((classax,), fracs)
+    ds.axes[:class] = classax
     sumcl = xmap(ds.cloud_mask ⊘ (:x, :y), ds.SCL ⊘ (:x, :y), inplace=false, output=XOutput(outtype=Float64)) do cl, scl
         sum(i -> ARCEMEAnalysis._is_cloud(i...), zip(cl, scl))
     end
     cloudfrac = sumcl[1, 1, :].data ./ length(ds.x) ./ length(ds.y)
     ds.cubes[:cloud_fraction] = YAXArray((ds.time_sentinel_2_l2a,), cloudfrac)
     ds
+end
+
+"""
+Compute a cloud mask with a 5x5 window halo
+"""
+function arceme_cloudmask_halo(d)
+    combined_clouds = xmap(d.cloud_mask, d.SCL, inplace=false, output=XOutput(outtype=UInt8)) do cl, scl
+        ARCEMEAnalysis._is_clear_or_shadow(cl, scl) + 2 * (cl==3)
+    end
+    inwindows = (DAE.InputArray(combined_clouds.data, windows=(DAE.MovingWindow(-1, 1, 5, 1000, (1, 1000)), DAE.MovingWindow(-1, 1, 5, 1000, (1, 1000)), 1:size(combined_clouds, 3))),)
+    outspec = (DAE.create_outwindows((1000, 1000, size(combined_clouds, 3)), chunks=(500, 500, 25)),)
+    halofunc(x) = any(==(0), x) ? 0 : all(==(1), x) ? 1 : 2
+    op = DAE.GMDWop(inwindows, outspec, DAE.create_userfunction(halofunc, UInt8, is_mutating=false))
+    d.cubes[:cloudmask_halo] = YAXArray(d.cloud_mask.axes, DAE.results_as_diskarrays(op)[1], Dict("legend"=>"0 => Clouds or missing, 1=>clear sky, 2=> clear sky or shadow"))
 end
 
 using Reexport: @reexport

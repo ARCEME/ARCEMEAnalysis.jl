@@ -9,6 +9,7 @@ using ..ARCEMEAnalysis: local_cubepath, arceme_legends, Event
 using DataStructures: counter, OrderedDict
 using Statistics: mean
 using GeoMakie
+using DiskArrays: cache
 import DimensionalData as DD
 
 function filter_spline(xout, samplets, x, nout)
@@ -52,19 +53,19 @@ end
 
 function pairwise_without_missings(x, y)
     out = Point2f[]
+    indices = Int[]
     for i in eachindex(x, y)
         if !ismissing(y[i]) && isfinite(y[i])
             push!(out, Point2f(x[i], y[i]))
+            push!(indices, i)
         end
     end
-    out
+    out, indices
 end
 
-function open_plot_data(ev, class; strata="ESA_LC")
-    @info "Opening $ev"
-    ds = arceme_open(ev)
-    firstday = arceme_eventdate(ev) - Year(1)
-    lastday = arceme_eventdate(ev) + Year(1)
+function open_plot_data(ds, class; strata="ESA_LC")
+    firstday = arceme_eventdate(ds) - Year(1)
+    lastday = arceme_eventdate(ds) + Year(1)
     nms = Millisecond(lastday - firstday).value
     linscal = d -> Millisecond(d - firstday).value * 2 / nms
     x_s2 = map(linscal, ds.time_sentinel_2_l2a.val)
@@ -79,16 +80,16 @@ function open_plot_data(ev, class; strata="ESA_LC")
 
     dataplots = OrderedDict()
     interplots = OrderedDict()
+    index_orig = OrderedDict()
 
     for band in ds.band_s2
-
-        interplots[band] = pairwise_without_missings(range(0, 2, length=length(outax)), r_s2[band_s2=DD.At(band)].data[:])
-        dataplots[band] = pairwise_without_missings(x_s2, s2[band_s2=DD.At(band)].data[:])
+        interplots[band], _ = pairwise_without_missings(range(0, 2, length=length(outax)), r_s2[band_s2=DD.At(band)].data[:])
+        dataplots[band], index_orig[band] = pairwise_without_missings(x_s2, s2[band_s2=DD.At(band)].data[:])
     end
 
     for band in ds.band_s1
-        interplots[band] = pairwise_without_missings(range(0, 2, length=length(outax)), r_s1[band_s1=DD.At(band)].data[:])
-        dataplots[band] = pairwise_without_missings(x_s1, s1[band_s1=DD.At(band)].data[:])
+        interplots[band], _ = pairwise_without_missings(range(0, 2, length=length(outax)), r_s1[band_s1=DD.At(band)].data[:])
+        dataplots[band], index_orig[band] = pairwise_without_missings(x_s1, s1[band_s1=DD.At(band)].data[:])
     end
 
     classfracs = ds.class_fractions.data[:]
@@ -99,11 +100,11 @@ function open_plot_data(ev, class; strata="ESA_LC")
     classdesc = join(strs, ", ")
 
 
-    (dataplots, interplots, classdesc)
+    (dataplots, interplots, classdesc, index_orig)
 end
 
 
-function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=true, strata="ESA_LC")
+function fingerprint_plot(pairid=1; class=nothing, plotdict=IdDict(), interactive=true, strata="ESA_LC", mask_clouds=false)
 
     ipair = Observable{Int}(pairid)
     alleventpairs = arceme_validpairs()
@@ -114,13 +115,16 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=t
 
     class_choos = Observable{Any}(class)
 
-    d = lift(ipair, class_choos) do i, class
-        ev = alleventpairs[i][1]
-        open_plot_data(ev, class)
+    ds = lift(ipair) do i
+        ev = alleventpairs[i]
+        cache.(arceme_open.(ev))
     end
-    dhp = lift(ipair, class_choos) do i, class
-        ev = alleventpairs[i][2]
-        open_plot_data(ev, class)
+
+    d = lift(ds, class_choos) do dss, class
+        open_plot_data(dss[1], class)
+    end
+    dhp = lift(ds, class_choos) do dss, class
+        open_plot_data(dss[2], class)
     end
     fig = Figure(size=(1600, 2600))
 
@@ -145,15 +149,19 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=t
         end
     end
 
+    repr_ind_d = Observable{Any}(nothing)
+    repr_ind_dhp = Observable{Any}(nothing)
+    omask_clouds = Observable{Bool}(mask_clouds)
+
     npl = maximum(first, keys(allax))
     for ipl in 1:npl
         linkyaxes!(allax[(ipl, 1)], allax[(ipl, 2)])
     end
     ov1 = Axis(fig[5:6, 3], aspect=DataAspect(), title="Drought")
-    img1 = lift((y, i) -> arceme_representative_image(alleventpairs[i][1], class=y), class_choos, ipair)
+    img1 = lift((y, i, ind, mask_clouds) -> arceme_representative_image(i[1]; class=y, repr_ind=ind, mask_clouds), class_choos, ds, repr_ind_d, omask_clouds)
     heatmap!(ov1, img1)
     ov2 = Axis(fig[7:8, 3], aspect=DataAspect(), title="Drought + HP")
-    img2 = lift((y, i) -> arceme_representative_image(alleventpairs[i][2], class=y), class_choos, ipair)
+    img2 = lift((y, i, ind, mask_clouds) -> arceme_representative_image(i[2]; class=y, repr_ind=ind, mask_clouds), class_choos, ds, repr_ind_dhp, omask_clouds)
     heatmap!(ov2, img2)
 
 
@@ -167,14 +175,36 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=t
     # xlims!(gax, lift(xpos -> minimum(xpos) - 20, xpos), lift(xpos -> maximum(xpos) + 20, xpos))
     # ylims!(gax, lift(ypos -> minimum(ypos) - 20, ypos), lift(ypos -> maximum(ypos) + 20, ypos))
     if interactive
-        menupair = Textbox(fig, placeholder=string(ipair[]), validator=Int, tellwidth=false)
+
         #menupair = Slider(fig, range=1:length(alleventpairs), startvalue=pairid, update_while_dragging=false)
+
+        menupair = Textbox(fig, placeholder=string(ipair[]), validator=Int)
         menuclass = Menu(fig, options=collect(values(arceme_legends[strata])), default=class)
+        # cb = Checkbox(checkboxes[1, 1], checked=false)
+        cb2 = Checkbox(fig, checked=true)
+        # cb3 = Checkbox(checkboxes[3, 1], checked=true)
+        on(c->setindex!(omask_clouds, c), cb2.checked)
+
         fig[1:2, 3] = vgrid!(
             menupair,
             Label(fig, lift(i -> i[3], d), color=:red),
             Label(fig, lift(i -> i[3], dhp), color=:blue),
-            menuclass,)
+            menuclass,
+            cb2,
+        )
+
+
+        #fig[1:2,3] = allmenus
+
+
+        # checkboxes = GridLayout(allmenus[5:7, 1:3])
+
+
+
+
+        # Label(checkboxes[1, 2], "Classmask", halign=:left)
+        # Label(checkboxes[2, 2], "Cloudmask", halign=:left)
+        # Label(checkboxes[3, 2], "SCL Mask", halign=:left)
         on(menuclass.selection) do s
             class_choos[] = s
         end
@@ -186,38 +216,59 @@ function fingerprint_plot(pairid=1; lc=nothing, plotdict=IdDict(), interactive=t
             autolimits!(ov1)
             autolimits!(ov2)
         end
+        on(events(fig).mousebutton) do event
+            if event.button == Mouse.left && event.action == Mouse.press
+                p, i = pick(fig)
+                index, i_dhp = get(plotdict, p, (nothing, nothing))
+                if !isnothing(index)
+                    if i_dhp == 1
+                        indices = last(d[])
+                        repr_ind_d[] = indices[index][i]
+                    else
+                        indices = last(dhp[])
+                        repr_ind_dhp[] = indices[index][i]
+                    end
+                    Consume(true)
+                end
+            end
+        end
     end
     fig
 end
 
 
-arceme_representative_image(ev::Event; index_use="NDVI", brighten_factor=2, class=nothing) =
-    arceme_representative_image(arceme_open(ev); index_use, brighten_factor, class)
+arceme_representative_image(ev::Event; index_use="NDVI", brighten_factor=2, repr_ind=nothing, class=nothing, mask_clouds=false) =
+    arceme_representative_image(arceme_open(ev); index_use, brighten_factor, repr_ind, class, mask_clouds)
 
 """
     arceme_representative_image(ev)
 
 Creates an RGB image highlighting on a cloud-free time step with high NDVI for a certain land cover type 
 """
-function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, class=nothing, strata="ESA_LC")
+function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, repr_ind=nothing, class=nothing, strata="ESA_LC", mask_clouds=false)
     if class === nothing
         classfrac = ds.class_fractions.data[:]
         _, iclass = findmax(classfrac)
         class = ds.class.val[iclass]
     end
-    ndvi = ds.s2_indices[band=DD.At(index_use), class=DD.At(class)]
-    allndviranks = sortperm(ndvi.data[:], rev=true)
-    repr_ind = 0
-    cloudfrac = ds.cloud_fraction.data[:]
-    for i in 1:length(allndviranks)
-        icandidate = findfirst(==(i), allndviranks)
-        if !ismissing(ndvi[icandidate]) && cloudfrac[icandidate] < 0.05
-            repr_ind = icandidate
-            break
+    if repr_ind === nothing
+        ndvi = ds.s2_indices[band=DD.At(index_use), class=DD.At(class)]
+        allndviranks = sortperm(ndvi.data[:], rev=true)
+        repr_ind = 0
+        cloudfrac = ds.cloud_fraction.data[:]
+        for i in 1:length(allndviranks)
+            icandidate = findfirst(==(i), allndviranks)
+            if !ismissing(ndvi[icandidate]) && cloudfrac[icandidate] < 0.05
+                repr_ind = icandidate
+                break
+            end
         end
-    end
-    if repr_ind == 0
-        return YAXArray((ds.x, ds.y), fill(RGBA(0.0, 0.0, 0.0, 1.0), 1000, 1000), Dict{Any,Any}())
+        if repr_ind == 0
+            return YAXArray((ds.x, ds.y), fill(RGBA(0.0, 0.0, 0.0, 1.0), 1000, 1000), Dict{Any,Any}())
+        end
+    else
+        @show repr_ind
+        @show ds.time_sentinel_2_l2a[repr_ind]
     end
     brfilt(a, factor, alpha) = RGBA(clamp(a.r * factor, 0, 1), clamp(a.g * factor, 0, 1), clamp(a.b * factor, 0, 1), alpha)
     ilc = findfirst(==(class), collect(values(arceme_legends[strata])))
@@ -226,7 +277,16 @@ function arceme_representative_image(ds; index_use="NDVI", brighten_factor=2, cl
         alpha = lcv == ilc ? 1.0 : 0.5
         brfilt(col, f, alpha)
     end
-    r[:, :]
+    if mask_clouds
+        cl = ds.cloud_mask[:, :, repr_ind]
+        scl = ds.SCL[:, :, repr_ind]
+        is_cloud = map(ARCEMEAnalysis._is_cloud, cl.data, scl.data)
+        res = r[:, :]
+        res[is_cloud] .= RGBA(0.0, 0.0, 1.0, 1.0)
+        res
+    else
+        r[:, :]
+    end
 end
 
 function compute_knots(xgood, ntarget=19)
