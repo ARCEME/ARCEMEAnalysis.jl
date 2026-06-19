@@ -34,11 +34,6 @@ end
 
 
 
-
-pairnow = arceme_validpairs()[4]
-
-
-
 function most_common_class(pairnow)
     ds1, ds2 = arceme_open.(pairnow)
     #Find maximum landcover in both cubes
