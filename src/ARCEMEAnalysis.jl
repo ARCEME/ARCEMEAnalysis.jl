@@ -567,7 +567,7 @@ function writeindexcubes(ds, event, output_base, fields_to_save)
     compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true, showprogress=false)
     if haskey(ds.cubes, :vv_db)
         cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
-        savedataset(cube2, path=joinpath(output_base, name), append=true)
+        savedataset(cube2, path=joinpath(output_base, name), append=true, use_dagger=false)
     end
     cube3 = ds[["cloud_fraction", "cloudmask_halo"]]
     savedataset(cube3, path=joinpath(output_base, name), append=true)
