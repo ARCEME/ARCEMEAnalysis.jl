@@ -536,8 +536,9 @@ a shared sigma parameter per land cover class is computed.
 
 """
 function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-DHP-GLOBAL", subset=:)
-
+    println(subset)
     @showprogress pmap(arceme_validpairs(batch=batch)[subset]) do ev
+        println(ev)
         ds_pair = arceme_open.(ev, indices=false, batch=batch)
         foreach(ds_pair) do ds
             do_s1 = haskey(ds.cubes, :vh)
