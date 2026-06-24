@@ -132,7 +132,7 @@ export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_ev
     arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
     time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
     arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint, arceme_fractions,
-    arceme_legends, arceme_cloudmask_halo
+    arceme_legends, arceme_cloudmask_halo, arceme_precompute_fingerprints
 
 """
     _arceme_cubenames(;batch="6")
@@ -692,6 +692,19 @@ function arceme_cloudmask_halo(d)
     halofunc(x) = any(==(0), x) ? 0 : all(==(1), x) ? 1 : 2
     op = DAE.GMDWop(inwindows, outspec, DAE.create_userfunction(halofunc, UInt8, is_mutating=false))
     d.cubes[:cloudmask_halo] = YAXArray(d.cloud_mask.axes, DAE.results_as_diskarrays(op)[1], Dict("legend"=>"0 => Clouds or missing, 1=>clear sky, 2=> clear sky or shadow"))
+end
+
+function arceme_precompute_fingerprints(tmpdir="./fingerprints"; batch="ARCEME-DC-DHP-GLOBAL")
+    @showprogress pmap(Iterators.product(1:2, arceme_validpairs(; batch))) do (iev, ev_p)
+        ev = ev_p[iev]
+        ds = arceme_open(ev; batch)
+        fp = ARCEMEAnalysis.arceme_index_fingerprints(ds)
+        savedataset(fp, path=joinpath(tmpdir, arceme_cubename(ev)), overwrite=true)
+    end
+
+    outputzipfile = joinpath(ARCEMEAnalysis.local_cubepath, "ARCEME-$batch-fingerprints.zip")
+    isfile(outputzipfile) && rm(outputzipfile)
+    ARCEMEAnalysis.zip_dir(outputzipfile, tmpdir)
 end
 
 using Reexport: @reexport
