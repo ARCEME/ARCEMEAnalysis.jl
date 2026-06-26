@@ -79,7 +79,7 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
     end
 
     win_data = YAXArrays.windows(predcube, lccube, expected_groups=1:ncl)
-    fp = YAXArrays.compute(mean.(win_data).data, showprogress=false)[:, :, 1, 1, 1, :]
+    fp = YAXArrays.compute(xmap(mean, win_data, min_nvalid=50000).data, showprogress=false)[:, :, 1, 1, 1, :]
     # win_data = YAXArrays.windows(inputcube_filtered, lccube, expected_groups=1:ncl)
     # fp = YAXArrays.compute(mean.(win_data).data)[:, 1, 1, :]
 
