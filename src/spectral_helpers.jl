@@ -16,11 +16,13 @@ function (ntw::NTWrapper{F,names})(args...) where {F,names}
 end
 NTWrapper(f,names::Tuple,consts::NamedTuple,indices) = NTWrapper(f,Val(names),consts,indices)
 function inner_compute_indices_s2(bands, consts, indices_tuple)
-    (bands.cl > 0 || (bands.scl in (1, 3, 7, 8, 9, 10, 11))) && return map(_ -> NaN, indices_tuple)
-    bandparams = map(ARCEMEAnalysis.boa,bands)
-    allparams = (; bandparams..., consts...)
+    _is_clear_or_shadow(bands.cl, bands.scl) || return map(_ -> NaN, indices_tuple)
+    bandparams = map(ARCEMEAnalysis.boa, bands)
+    bands2 = map(between_one_and_zero, bandparams)
+    allparams = (; bands2..., consts...)
     listofindices(indices_tuple, allparams)
 end
+between_one_and_zero(x) = ifelse(0.0 <= x <= 1.0, x, oftype(x, NaN))
 function inner_compute_indices_s1(bands, consts, indices_tuple)
     allparams = (; bands..., consts...)
     listofindices(indices_tuple, allparams)
@@ -50,7 +52,9 @@ function _compute_indices(ds, indices, platform; showprog=true)
 end
 
 #Helper functions to compute the indices from named tuples for type stability
-compute_indexx(index::SpectralIndices.SpectralIndex{<:Any,B}, params::NamedTuple) where B = index.compute(Float64, params[B]...)
+function compute_indexx(index::SpectralIndices.SpectralIndex{<:Any,B}, params::NamedTuple) where B
+    index.compute(Float64, params[B]...)
+end
 function listofindices(indices, values)
     map(indices) do index
         compute_indexx(index, values)

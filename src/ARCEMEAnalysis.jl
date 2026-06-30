@@ -702,7 +702,7 @@ function arceme_precompute_fingerprints(tmpdir="./fingerprints"; batch="ARCEME-D
         savedataset(fp, path=joinpath(tmpdir, arceme_cubename(ev)), overwrite=true)
     end
 
-    outputzipfile = joinpath(ARCEMEAnalysis.local_cubepath, "ARCEME-$batch-fingerprints.zip")
+    outputzipfile = joinpath(ARCEMEAnalysis.local_cubepath, "$batch-fingerprints.zip")
     isfile(outputzipfile) && rm(outputzipfile)
     ARCEMEAnalysis.zip_dir(outputzipfile, tmpdir)
 end
