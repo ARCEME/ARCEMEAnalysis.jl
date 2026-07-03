@@ -13,6 +13,8 @@ using Random: seed!
 using DataFrames
 using Interpolations
 using HypothesisTests: OneWayANOVATest
+using RollingFunctions
+
 
 
 ESA_LC_colormap = [
@@ -60,7 +62,7 @@ ctykeys = hcat(
 
 function getticks(mn, mx)
     n = length(range(mn, mx))
-    collect((mn+(mx-mn)/(2*n)):(mx-mn)/n:mx)
+    collect((mn+(mx-mn)/(2*n)):((mx-mn)/n):mx)
 end
 
 function plotlc(
@@ -71,7 +73,7 @@ function plotlc(
 )
     ds = arceme_open(current_event, batch = batch)
     f, ax, p = image(
-        ds.ESA_LC[time = 1],
+        ds.ESA_LC[time=1],
         colormap = cgrad(clc_clrs; categorical = true),
         colorrange = (10, 110),
         # label = "Land cover",
@@ -160,7 +162,7 @@ function plotmceh(
     for i = 1:14
         hist!(
             ax,
-            mce[.!(ismissing.(mce))][cty.==i],
+            mce[.!(ismissing.(mce))][cty .== i],
             scale_to = -0.5,
             offset = i,
             direction = :x,
@@ -169,7 +171,7 @@ function plotmceh(
         )
         hist!(
             ax,
-            mch[.!(ismissing.(mch))][cty.==i],
+            mch[.!(ismissing.(mch))][cty .== i],
             scale_to = 0.5,
             offset = i,
             direction = :x,
@@ -270,7 +272,7 @@ function fpfig(
         scatterlines!(
             ax,
             datetime2unix.(tempo_s2),
-            mfp_cty.uncorrected_s2_indices[band_s2 = At(idx), class = At(mclass)].data[:],
+            mfp_cty.uncorrected_s2_indices[band_s2=At(idx), class=At(mclass)].data[:],
             label = "$(mclass) - $idx",
             linewidth = 2,
         )
@@ -278,7 +280,7 @@ function fpfig(
     scatterlines!(
         ax,
         datetime2unix.(tempo_s2),
-        fp_cty.uncorrected_s2_indices[band_s2 = At(idx), class = At(class)].data[:],
+        fp_cty.uncorrected_s2_indices[band_s2=At(idx), class=At(class)].data[:],
         label = "$(class) - $idx",
         linewidth = 1,
     )
@@ -355,7 +357,7 @@ function plot_cpbsb_splines(
         lines!(
             a1,
             datetime2unix.(lookup(r_s2.time)),
-            r_s2[band_s2 = At(idx)].data[:, i[1], i[2], 1],
+            r_s2[band_s2=At(idx)].data[:, i[1], i[2], 1],
             color = cpbsb,
             colorrange = (0, 295),
             colormap = (:viridis, 0.5),
@@ -411,7 +413,7 @@ function crop_splines(
         lines!(
             a1,
             tempo,
-            r_s2[band_s2 = At(idx)].data[:, i[1], i[2], 1],
+            r_s2[band_s2=At(idx)].data[:, i[1], i[2], 1],
             color = mn,
             colorrange = (0, mx),
             colormap = (:viridis, mx),
@@ -445,7 +447,7 @@ function tsstatsA(xout, ts, mce, mch, tempo)
         @show tempo[missmask]
     end
     # tmx = Day(tempo[missmask][ind][ts[missmask][ind].==mx][1] - tempo[1]).value
-    tmx = dayofyear(tempo[missmask][ind][ts[missmask][ind].==mx][1])
+    tmx = dayofyear(tempo[missmask][ind][ts[missmask][ind] .== mx][1])
     # need to interpolate over tempo to have a comparable basis
 
     sts = sum(ts[missmask][ind])
@@ -469,7 +471,7 @@ function arceme_acrop(
 
     indcrop = getindcrop(current_event, crop; batch)
     indBSB = findall(x -> x > 0 && x < 65000, ds.CPBSB.data[:, :])
-    if isempty(indcrop[indcrop.∈(indBSB,)])
+    if isempty(indcrop[indcrop .∈ (indBSB,)])
         println(io, "No BSB data for $crop ANOVA")
         return (nothing, nothing, nothing)
     end
@@ -502,8 +504,8 @@ function arceme_acrop(
         function_args = (lookup(ds.time_sentinel_2_l2a),),
     )
     data_anova = hcat(
-        permutedims(mcstata.data[:, indcrop[indcrop.∈(indBSB,)], 1]),
-        gbsb.data[indcrop[indcrop.∈(indBSB,)]],
+        permutedims(mcstata.data[:, indcrop[indcrop .∈ (indBSB,)], 1]),
+        gbsb.data[indcrop[indcrop .∈ (indBSB,)]],
     )
     df_anova =
         DataFrame(
@@ -568,10 +570,10 @@ function tsstatsP(xout, ts, tempo)
     indGrowing2 = month.(tempo[missmask]) .∈ (3:10,) .&& tempo[missmask] .>= event_date
     avr = mean(ts[missmask][indWinter])
     mx1 = maximum(ts[missmask][indGrowing1])
-    tmx1 = dayofyear(tempo[missmask][indGrowing1][ts[missmask][indGrowing1].==mx1][1])
+    tmx1 = dayofyear(tempo[missmask][indGrowing1][ts[missmask][indGrowing1] .== mx1][1])
     sts1 = sum(ts[missmask][indGrowing1])
     mx2 = maximum(ts[missmask][indGrowing2])
-    tmx2 = dayofyear(tempo[missmask][indGrowing2][ts[missmask][indGrowing2].==mx2][1])
+    tmx2 = dayofyear(tempo[missmask][indGrowing2][ts[missmask][indGrowing2] .== mx2][1])
     sts2 = sum(ts[missmask][indGrowing2])
     xout .= cat(avr, mx1, tmx1, sts1, mx2, tmx2, sts2, dims = 1)
     return nothing
@@ -677,18 +679,32 @@ function arceme_pcrop(
     return (f, res, data_anova)
 end
 
-function interpolate_ts(tmp, tempo)
+"""
+`interpolate_ts(values::Vector, time::Vector{DateTime}; eachday=false, filter=false)`
+
+Linearly interpolates missing values in time series `values` at each time step in `time` (`eachday=false`) or at each day (`eachday=true`).
+If `filter` is `false`, values that jump for more than 0.5 over less than 20 days are discarded. If `filter` is `true`, a moving median filter is applied before interpolating (defalut `windowsize=5`)
+
+"""
+function interpolate_ts(tmp, tempo; eachday = false, filter = false, windowsize = 5)
     dayssincestart = datetime2julian.(tempo) .- datetime2julian(tempo[1])
     missmask = findall(x -> !ismissing(x) && isfinite(x), tmp)
-    # flag jumps
-    indflag = findall(
-        broadcast(
-            (x, y) -> x > 0.5 && y <= 20,
-            diff(tmp[missmask]),
-            diff(dayssincestart[missmask]),
-        ),
-    )
-    deleteat!(missmask, indflag .+ 1)
+
+    if filter
+        # apply median filter
+        tmp1 = running(median, windowsize)
+        tmp[missmask] = tmp1
+    else
+        # flag jumps
+        indflag = findall(
+            broadcast(
+                (x, y) -> x > 0.5 && y <= 20,
+                diff(tmp[missmask]),
+                diff(dayssincestart[missmask]),
+            ),
+        )
+        deleteat!(missmask, indflag .+ 1)
+    end
     # linear interpolation 
     tmp1 = fill(NaN, length(tmp))
     tmp1[missmask] .= tmp[missmask]
@@ -772,19 +788,61 @@ function plot_ts(idx, current_event; layer = "kNDVI", batch = "ARCEME-DC-8")
     # # the succesive iterations don't do anything! Because of the linear interpolation, I suppose?
     # # Maybe I should use a rolling mean before
 
-    # rolling mean
+    # running mean
     tmp_rm = running(mean, tmp1, 5)
     lines!(
         a,
-        dayssincestart[1:end-2],
+        dayssincestart[1:(end-2)],
         tmp_rm[3:end],
         color = Makie.wong_colors()[2],
         label = "Rolling mean w=5",
     )
+
+    # running median before interpolation
+    tmp_rmd = fill(NaN, length(tmp))
+    w=3
+    tmp_rmd[missmask] = running(median, tmp[missmask], w)
+
+    itp = interpolate(nodes, tmp_rmd[missmask], Gridded(Interpolations.Linear()))
+    # pad with first value
+    if missmask[1] > 1
+        tmp_rmd[1:(missmask[1]-1)] .= tmp_rmd[missmask[1]]
+    end
+    # pad with last value
+    if missmask[end] < length(dayssincestart)
+        tmp_rmd[(missmask[end]+1):end] .= tmp_rmd[missmask[end]]
+    end
+    tmp_rmd[missmask[1]:missmask[end]] = itp(dayssincestart[missmask[1]:missmask[end]])
+    scatterlines!(
+        a,
+        dayssincestart[missmask],
+        tmp_rmd[missmask],
+        color = Makie.wong_colors()[4],
+        label = "running median w=$w",
+    )
+    scatterlines!(
+        a,
+        dayssincestart,#[1:(end-2)],
+        tmp_rmd,#[3:end],
+        color = Makie.wong_colors()[4],
+        markersize = 5,
+        label = "interpolated running median w=$w",
+    )
+
+    # running median after interpolarion
+    tmp_rmd2 = running(median, tmp1, 5)
+    lines!(
+        a,
+        dayssincestart[1:(end-2)],
+        tmp_rmd2[3:end],
+        color = Makie.wong_colors()[5],
+        label = "Rolling median w=5",
+    )
+
     r_s2 = CubePlots.getsplines(current_event)
-    sp = r_s2[band_s2 = At(layer)].data[:, idx[1], idx[2], 1]
+    sp = r_s2[band_s2=At(layer)].data[:, idx[1], idx[2], 1]
     lines!(a, sp, color = Makie.wong_colors()[3], label = "Spline 19 knots")
-    axislegend(a)
+    Legend(f[2, 1], a, orientation = :horizontal, nbanks = 3)
     f
     return (f, tmp1, tmp_rm, sp)
 end
