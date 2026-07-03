@@ -7,7 +7,8 @@ function sincosparams(c,timname = :time_sentinel_2_l2a)
         c ⊘ timname, 
         output=XOutput(DD.Dim{:param}(["p1","p2","p3"]),outtype=Float32),
         inplace=false,
-        function_args=(fitmat,)
+        function_args=(fitmat,),
+        allow_threads=true
     )
 end
 
@@ -50,37 +51,48 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
     timdim = DD.dims(inputcube,timeaxis)
     fitmat = YAXArray((timdim, pars.param),ARCEMEAnalysis.bare_matrix(inputcube,timeaxis))
 
-    clearsky_expected = xmap(pars ⊘ :param, fitmat ⊘ :param,inplace=false) do p,t
-        p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
-    end
-    win_clearsky = YAXArrays.windows(clearsky_expected, lccube, expected_groups=1:ncl)
-    fp_clearsky_expected = mean.(win_clearsky)[:,1,1,1,:].data
+    # clearsky_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, inplace=false, lazy=true) do p, t
+    #     p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
+    # end
+    # win_clearsky = YAXArrays.windows(clearsky_expected, lccube, expected_groups=1:ncl)
+    # fp_clearsky_expected = YAXArrays.compute(mean.(win_clearsky).data)[:, 1, 1, 1, :]
 
-    clouded_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, cloudcube, sclcube, inplace=false) do p, t, cl, scl
+    # clouded_expected = xmap(pars ⊘ :param, fitmat ⊘ :param, cloudcube, sclcube, inplace=false) do p, t, cl, scl
+    #     if _is_cloud(cl,scl)
+    #         return NaN
+    #     else
+    #         p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
+    #     end
+    # end
+    # win_clouded = YAXArrays.windows(clouded_expected, lccube, expected_groups=1:ncl)
+    # fp_clouded_expected = YAXArrays.compute(mean.(win_clouded).data)[:, 1, 1, 1, :]
+    varax = DD.Dim{:Variable}(["expected", "expected_cloudfiltered", "data_cloudfiltered"])
+    predcube = xmap(pars ⊘ :param, fitmat ⊘ :param, inputcube, cloudcube, sclcube, inplace=true, output=XOutput(varax, outtype=Float32)) do out, p, t, x, cl, scl
+        expected = p[1] * t[1] + p[2] * t[2] + p[3] * t[3]
+        out[1] = expected
         if _is_cloud(cl,scl)
-            return NaN
+            out[2] = NaN
+            out[3] = NaN
         else
-            p[1]*t[1]+p[2]*t[2]+p[3]*t[3]
+            out[2] = expected
+            out[3] = x
         end
     end
-    win_clouded = YAXArrays.windows(clouded_expected, lccube, expected_groups=1:ncl)
-    fp_clouded_expected = mean.(win_clouded)[:,1,1,1,:].data
 
-    inputcube_filtered = xmap(inputcube, cloudcube,sclcube,inplace=false,output=XOutput(outtype=Float32)) do x,cl,scl
-        _is_cloud(cl,scl) ? NaN : x
-    end
-    win_data = YAXArrays.windows(inputcube_filtered, lccube, expected_groups=1:ncl)
-    fp = mean.(win_data)[:,1,1,:].data
+    win_data = YAXArrays.windows(predcube, lccube, expected_groups=1:ncl)
+    fp = YAXArrays.compute(mean.(win_data).data, showprogress=false)[:, :, 1, 1, 1, :]
+    # win_data = YAXArrays.windows(inputcube_filtered, lccube, expected_groups=1:ncl)
+    # fp = YAXArrays.compute(mean.(win_data).data)[:, 1, 1, :]
 
-    newdata = fp[:,:] .+ fp_clearsky_expected[:,:] .- fp_clouded_expected[:,:]
+    newdata = fp[:, 3, :] .+ fp[:, 1, :] .- fp[:, 2, :]
 
     classax = classaxis(strata, ncl)
 
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
-        fp_uncorrected=YAXArray((classax, timdim), fp[:, :]),
-        fp_clearsky_expected=YAXArray((classax, timdim), fp_clearsky_expected[:, :]),
-        fp_clouded_expected=YAXArray((classax, timdim), fp_clouded_expected[:, :]),
+        fp_uncorrected=YAXArray((classax, timdim), fp[:, 3, :]),
+        fp_clearsky_expected=YAXArray((classax, timdim), fp[:, 1, :]),
+        fp_clouded_expected=YAXArray((classax, timdim), fp[:, 2, :]),
         params=pars,
         smooth_matrix=fitmat,
     )
