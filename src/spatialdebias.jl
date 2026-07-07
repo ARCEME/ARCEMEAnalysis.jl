@@ -44,8 +44,7 @@ Computes a cloud-biased corrected footprint of `dataset[band]` aggregated by str
 function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC", timeaxis=:time_sentinel_2_l2a)
     ncl = nstrata(strata)
     lccube = lckeymap(dataset, strata=strata)
-    cloudcube = dataset.cloud_mask
-    sclcube = dataset.SCL
+    cloudhalocube = dataset.cloudmask_halo
     inputcube = dataset[band]
     pars = ARCEMEAnalysis.sincosparams(inputcube)[:,:,:,1]
     timdim = DD.dims(inputcube,timeaxis)
@@ -67,10 +66,10 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
     # win_clouded = YAXArrays.windows(clouded_expected, lccube, expected_groups=1:ncl)
     # fp_clouded_expected = YAXArrays.compute(mean.(win_clouded).data)[:, 1, 1, 1, :]
     varax = DD.Dim{:Variable}(["expected", "expected_cloudfiltered", "data_cloudfiltered"])
-    predcube = xmap(pars ⊘ :param, fitmat ⊘ :param, inputcube, cloudcube, sclcube, inplace=true, output=XOutput(varax, outtype=Float32)) do out, p, t, x, cl, scl
+    predcube = xmap(pars ⊘ :param, fitmat ⊘ :param, inputcube, cloudhalocube, inplace=true, output=XOutput(varax, outtype=Float32)) do out, p, t, x, clh
         expected = p[1] * t[1] + p[2] * t[2] + p[3] * t[3]
         out[1] = expected
-        if _is_cloud(cl,scl)
+        if clh != 1
             out[2] = NaN
             out[3] = NaN
         else
@@ -80,13 +79,15 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
     end
 
     win_data = YAXArrays.windows(predcube, lccube, expected_groups=1:ncl)
-    fp = YAXArrays.compute(mean.(win_data).data, showprogress=false)[:, :, 1, 1, 1, :]
+    fp = YAXArrays.compute(xmap(mean, win_data, min_nvalid=50000).data, showprogress=false)[:, :, 1, 1, 1, :]
     # win_data = YAXArrays.windows(inputcube_filtered, lccube, expected_groups=1:ncl)
     # fp = YAXArrays.compute(mean.(win_data).data)[:, 1, 1, :]
 
     newdata = fp[:, 3, :] .+ fp[:, 1, :] .- fp[:, 2, :]
 
     classax = classaxis(strata, ncl)
+
+    abundance = counter(lccube)
 
     Dataset(
         fp = YAXArray((classax,timdim),newdata),
@@ -95,6 +96,7 @@ function arceme_bias_corrected_fp(band::String, dataset::Dataset; strata="ESA_LC
         fp_clouded_expected=YAXArray((classax, timdim), fp[:, 2, :]),
         params=pars,
         smooth_matrix=fitmat,
+        class_fractions=YAXArray((classax,), [abundance[i] for i in 1:ncl])
     )
     
 end

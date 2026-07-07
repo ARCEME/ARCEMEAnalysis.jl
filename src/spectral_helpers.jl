@@ -16,17 +16,19 @@ function (ntw::NTWrapper{F,names})(args...) where {F,names}
 end
 NTWrapper(f,names::Tuple,consts::NamedTuple,indices) = NTWrapper(f,Val(names),consts,indices)
 function inner_compute_indices_s2(bands, consts, indices_tuple)
-    (bands.cl > 0 || (bands.scl in (1, 3, 7, 8, 9, 10, 11))) && return map(_ -> NaN, indices_tuple)
-    bandparams = map(ARCEMEAnalysis.boa,bands)
-    allparams = (; bandparams..., consts...)
+    _is_clear_or_shadow(bands.cl, bands.scl) || return map(_ -> NaN, indices_tuple)
+    bandparams = map(ARCEMEAnalysis.boa, bands)
+    bands2 = map(between_one_and_zero, bandparams)
+    allparams = (; bands2..., consts...)
     listofindices(indices_tuple, allparams)
 end
+between_one_and_zero(x) = ifelse(0.0 <= x <= 1.0, x, oftype(x, NaN))
 function inner_compute_indices_s1(bands, consts, indices_tuple)
     allparams = (; bands..., consts...)
     listofindices(indices_tuple, allparams)
 end
 
-function _compute_indices(ds,indices,platform)
+function _compute_indices(ds, indices, platform; showprog=true)
     indices_tuple = ((SI.indices[k] for k in indices)...,)
 
     allvars = mapreduce(r->Set(string.(SI._band_names(r))),union!,indices_tuple)
@@ -50,7 +52,9 @@ function _compute_indices(ds,indices,platform)
 end
 
 #Helper functions to compute the indices from named tuples for type stability
-compute_indexx(index::SpectralIndices.SpectralIndex{<:Any,B}, params::NamedTuple) where B = index.compute(Float64, params[B]...)
+function compute_indexx(index::SpectralIndices.SpectralIndex{<:Any,B}, params::NamedTuple) where B
+    index.compute(Float64, params[B]...)
+end
 function listofindices(indices, values)
     map(indices) do index
         compute_indexx(index, values)
@@ -76,7 +80,7 @@ function estimate_sigma_per_lc(ds;bands=(:B08,:B04))
     iw2 = DAE.InputArray(ds.ESA_LC[time=1].data)
     ow = DAE.create_outwindows((si..., 12), windows=(fill.(1, si)..., [1:12]))
     op = DAE.GMDWop((iw1, iw2), (ow,), f)
-    res = DAE.compute(DAE.results_as_diskarrays(op)[1])
+    res = DAE.compute(DAE.results_as_diskarrays(op)[1], showprogress=false)
     res[1, 1, 1, :]
 end
 

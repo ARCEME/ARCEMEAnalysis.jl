@@ -13,6 +13,7 @@ using SpectralIndices: compute_index, SpectralIndices
 import Proj
 import SpectralIndices as SI
 import GeoJSON
+import Distributed: nprocs, pmap
 
 function __init__()
     #Extend SpectralIndices band definitions with S1 bands
@@ -131,14 +132,14 @@ export arceme_cubename, arceme_open, arceme_starttime, arceme_endtime, arceme_ev
     arceme_landcover, arceme_optical_band_fingerprints, arceme_radar_fingerprints,
     time_aggregate_fingerprint, arceme_validpairs, arceme_spectral, arceme_kndvi, arceme_radar_db,
     arceme_create_indexcubes, arceme_index_fingerprints, arceme_open_fingerprint, arceme_fractions,
-    arceme_legends
+    arceme_legends, arceme_cloudmask_halo, arceme_precompute_fingerprints
 
 """
     _arceme_cubenames(;batch="6")
 
 List all available data cube names in the specified batch stored in the ARCEME S3 bucket.
 """
-function _arceme_cubenames(; batch="ARCEME-DC-6")
+function _arceme_cubenames(; batch="ARCEME-DC-DHP-GLOBAL")
     cubenames = if local_cubepath === nothing
         store = S3Store("$(batch)/", MinioConfig(httpstore))
 
@@ -226,12 +227,12 @@ arceme_eventpairs() =
     Iterators.partition(sort(arceme_eventlist(), by=i -> (i.event_label, i.source)), 2) |> collect
 
 """
-    arceme_validpairs(;batch="ARCEME-DC-6")
+    arceme_validpairs(;batch="ARCEME-DC-DHP-GLOBAL")
 
 Get valid pairs of ARCEME events from the local path (if set with arceme_set_localpath) or the http data store.
 Default httpstore is "https://s3.waw3-2.cloudferro.com/swift/v1". It can be reset with arceme_set_httpstore.
 """
-function arceme_validpairs(; batch="ARCEME-DC-6")
+function arceme_validpairs(; batch="ARCEME-DC-DHP-GLOBAL")
     allpairs = arceme_eventpairs()
     validpairs = if local_cubepath === nothing
         map(x -> all([Zarr.is_zgroup(Zarr.HTTPStore("$httpstore/$batch/$(arceme_cubename(i))"), "") for i in x]), allpairs)
@@ -241,15 +242,15 @@ function arceme_validpairs(; batch="ARCEME-DC-6")
     allpairs[validpairs]
 end
 
-function arceme_open(event::Event; batch="ARCEME-DC-6", indices=true, trylocal=true, fingerprint=true, hrl=true)
+function arceme_open(event::Event; batch="ARCEME-DC-DHP-GLOBAL", indices=true, trylocal=true, fingerprint=true, hrl=true)
     arceme_open(arceme_cubename(event); batch=batch, indices=indices, trylocal=trylocal, fingerprint=fingerprint, hrl=true)
 end
 
-function arceme_open_fingerprint(event::Event; batch="ARCEME-DC-6")
+function arceme_open_fingerprint(event::Event; batch="ARCEME-DC-DHP-GLOBAL")
     arceme_open_fingerprint(arceme_cubename(event); batch)
 end
 
-arceme_open_fingerprint(cubename; batch="ARCEME-DC-6") = open_dataset(joinpath(local_cubepath, "$batch-fingerprints.zip"), path=cubename, force_datetime=true)
+arceme_open_fingerprint(cubename; batch="ARCEME-DC-DHP-GLOBAL") = open_dataset(joinpath(local_cubepath, "$batch-fingerprints.zip"), path=cubename, force_datetime=true)
 
 """
      arceme_landcover(ds)
@@ -263,12 +264,12 @@ function arceme_landcover(ds)
         (key=k, class=v, count=count, fraction=count / 1000000)
     end
 end
-arceme_landcover(ev::Event; batch="ARCEME-DC-6") = arceme_landcover(arceme_open(ev, batch=batch))
+arceme_landcover(ev::Event; batch="ARCEME-DC-DHP-GLOBAL") = arceme_landcover(arceme_open(ev, batch=batch))
 
 
 """ 
-    arceme_open(cubename::String; batch="ARCEME-DC-6", indices=true, hrl=true)
-    arceme_open(event::Event; batch="ARCEME-DC-6", indices=true, hrl=true)
+    arceme_open(cubename::String; batch="ARCEME-DC-DHP-GLOBAL", indices=true, hrl=true)
+    arceme_open(event::Event; batch="ARCEME-DC-DHP-GLOBAL", indices=true, hrl=true)
 
 Open the specified ARCEME data cube from the local path (if with arceme_set_localpath) or 
     the httpstore (default "https://s3.waw3-2.cloudferro.com/swift/v1", reset with arceme_set_httpstore). 
@@ -276,11 +277,25 @@ If `indices=true` (`hrl=true`), also opens indices (hrl layers) if they exist on
 
 See also `arceme_create_indexcubes` and `HRL.hrl_warp`.
 """
-function arceme_open(cubename; batch="ARCEME-DC-6", indices=true, trylocal=true, fingerprint=true, hrl=true)
+function arceme_open(cubename; batch="ARCEME-DC-DHP-GLOBAL", indices=true, trylocal=true, fingerprint=true, hrl=true)
     if local_cubepath === nothing || !trylocal
         open_dataset("$httpstore/$batch/$cubename", force_datetime=true)
     else
         main_ds = open_dataset(joinpath(local_cubepath, batch, string(cubename, ".zip")), force_datetime=true)
+        if batch == "ARCEME-DC-DHP-GLOBAL"
+            # if :ESA_LC ∉ keys(main_ds.cubes)
+            #     @show cubename
+            #     oldds = open_dataset(joinpath(local_cubepath, "ARCEME-DC-6", string(cubename, ".zip")), force_datetime=true)
+            #     main_ds.cubes[:ESA_LC] = oldds.ESA_LC
+            # end
+            if :B01 ∉ keys(main_ds.cubes)
+                oldds = open_dataset(joinpath(local_cubepath, "ARCEME-DC-6", string(cubename, ".zip")), force_datetime=true)
+                main_ds.axes[:time_sentinel_2_l2a] = oldds.axes[:time_sentinel_2_l2a]
+                for v in [:B01, :B02, :B03, :B04, :B05, :B06, :B07, :B08, :B09, :B11, :B12, :B8A, :SCL, :cloud_mask]
+                    main_ds.cubes[v] = oldds.cubes[v]
+                end
+            end
+        end
         if indices && isfile(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")))
             index_ds = open_dataset(joinpath(local_cubepath, "$batch-INDICES", string(cubename, ".zip")), force_datetime=true)
             for (k, v) in (index_ds.cubes)
@@ -290,7 +305,7 @@ function arceme_open(cubename; batch="ARCEME-DC-6", indices=true, trylocal=true,
         if fingerprint
             try
                 ds_fp = arceme_open_fingerprint(cubename; batch)
-                main_ds = Dataset(; main_ds.cubes..., ds_fp.cubes...)
+                main_ds = Dataset(; main_ds.cubes..., ds_fp.cubes..., properties=main_ds.properties)
             catch
                 main_ds
             end
@@ -381,7 +396,7 @@ function arceme_spectral(ds, indices::Vector{String}; platform="sentinel2")
 end
 
 _is_cloud(cl, scl) = (cl > 0 || (scl in (0, 1, 3, 7, 8, 9, 10, 11)))
-
+_is_clear_or_shadow(cl, scl) = !(cl in (1, 2) || (scl in (0, 1, 3, 7, 8, 9, 10, 11)))
 
 
 """
@@ -520,48 +535,73 @@ For every valid event pair creates and stores a data cubes of a list of precompu
 a shared sigma parameter per land cover class is computed.
 
 """
-function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6", subset=:)
-
-    for ev in arceme_validpairs(batch=batch)[subset]
+function arceme_create_indexcubes(; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-DHP-GLOBAL", subset=:)
+    @showprogress pmap(arceme_validpairs(batch=batch)[subset]) do ev
         ds_pair = arceme_open.(ev, indices=false, batch=batch)
-
         foreach(ds_pair) do ds
-            arceme_spectral(ds, indices_s1, platform="sentinel1")
+            do_s1 = haskey(ds.cubes, :vh)
+            do_s1 && arceme_spectral(ds, indices_s1, platform="sentinel1")
             arceme_spectral(ds, indices_s2, platform="sentinel2")
-            arceme_radar_db(ds)
+            do_s1 && arceme_radar_db(ds)
+            arceme_cloudmask_halo(ds)
             arceme_fractions(ds)
         end
         ARCEMEAnalysis.arceme_kndvi_pair(ds_pair...)
 
-        fields_to_save = [indices_s1; indices_s2]
+
 
         output_base = "$local_cubepath/$(batch)-INDICES"
 
         foreach(ds_pair, ev) do ds, event
+            do_s1 = haskey(ds.cubes, :vh)
+            fields_to_save = do_s1 ? [indices_s1; indices_s2] : indices_s2
             writeindexcubes(ds, event, output_base, fields_to_save)
         end
     end
+    nothing
 end
 
 function writeindexcubes(ds, event, output_base, fields_to_save)
     name = arceme_cubename(event)
     indexcube = setchunks(ds[fields_to_save], (500, 500, 25))
-    compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true)
-    cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
-    savedataset(cube2, path=joinpath(output_base, name), append=true)
-    cube3 = ds[["cloud_fraction", "lc_fraction"]]
+    compute_to_zarr(indexcube, joinpath(output_base, name), custom_loopranges=(500, 500, 25), overwrite=true, showprogress=false, use_dagger=false)
+    if haskey(ds.cubes, :vv_db)
+        cube2 = setchunks(ds[["vv_db", "vh_db", "kNDVI"]], (500, 500, 25))
+        savedataset(cube2, path=joinpath(output_base, name), append=true)
+    end
+    cube3 = ds[["cloud_fraction", "cloudmask_halo"]]
     savedataset(cube3, path=joinpath(output_base, name), append=true)
     isfile(joinpath(output_base, string(name, ".zip"))) && rm(joinpath(output_base, string(name, ".zip")))
-    run(Cmd(`7z a -tzip -mx=0 ../$(name).zip .`, dir=joinpath(output_base, name)))
+    zip_dir(joinpath(output_base, "$name.zip"), joinpath(output_base, name))
     rm(joinpath(output_base, name), recursive=true)
 end
 
+# Utility function to zip a directory
+function apply_dirfiles(f, basepath, dir="")
+    flist = readdir(joinpath(basepath, dir))
+    for file in flist
+        if isdir(joinpath(basepath, dir, file))
+            apply_dirfiles(f, basepath, joinpath(dir, file))
+        else
+            f(basepath, joinpath(dir, file))
+        end
+    end
+end
+function zip_dir(output, d)
+    ZipWriter(output) do w
+        apply_dirfiles(d) do p, file
+            zip_newfile(w, file)
+            write(w, read(joinpath(p, file)))
+        end
+    end
+end
+
 """
-`arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6")`
+`arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV", "vv_db", "vh_db"], indices_s2=["NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-DHP-GLOBAL")`
 
 Computes indices for single events (not pairs) and stores them at `joinpath(local_cubepath,\"\$(batch)-INDICES\")`. 
 """
-function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-6")
+function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2=["NDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI"], batch="ARCEME-DC-DHP-GLOBAL")
     if !isdir(joinpath(local_cubepath, "$(batch)-INDICES"))
         mkdir(joinpath(local_cubepath, "$(batch)-INDICES"))
     end
@@ -576,6 +616,7 @@ function arceme_create_indexcubes(event_list; indices_s1=["DpRVIVV"], indices_s2
         arceme_spectral(ds, indices_s1, platform="sentinel1")
         arceme_spectral(ds, indices_s2, platform="sentinel2")
         arceme_radar_db(ds)
+        arceme_cloudmask_halo(ds)
         arceme_fractions(ds)
         arceme_kndvi(ds)
 
@@ -595,25 +636,27 @@ function arceme_index_fingerprints(ds; indices_s1=["DpRVIVV", "vv_db", "vh_db"],
     #banddim = DD.Dim{:band}(string.(optical_bands))
     indices_s2 = filter(i -> in(Symbol(i), keys(ds.cubes)), indices_s2) |> collect
     indices_s1 = filter(i -> in(Symbol(i), keys(ds.cubes)), indices_s1) |> collect
-    if isempty(indices_s1) || isempty(indices_s2)
-        return nothing
+    s1cubes, s2cubes = (), ()
+    if !isempty(indices_s1)
+        indexdim_s1 = DD.Dim{:band_s1}(indices_s1)
+        fp_s1 = map(indices_s1) do band
+            arceme_uncorrected_fp(band, ds, timeaxis=:time_sentinel_1_rtc, strata=strata)
+        end
+        fingerprint_sparse_s1 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s1), indexdim_s1), (; band_s1=length(indices_s1)))
+        s1cubes = (:s1_indices => fingerprint_sparse_s1, :class_fractions => fp_s1[1].class_fractions)
     end
-    indexdim_s2 = DD.Dim{:band_s2}(indices_s2)
-    indexdim_s1 = DD.Dim{:band_s1}(indices_s1)
-    #eventdate = arceme_eventdate(ds)
-    fp_s2 = @showprogress desc = "S2 fingerprint.." map(indices_s2) do band
-        arceme_bias_corrected_fp(band, ds, strata=strata)
-    end
-    fingerprint_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
-    fingerprint_uncor_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
-    #fingerprints_s2 = time_aggregate_fingerprint(fingerprint_sparse_s2, eventdate, indexdim_s2, :time_sentinel_2_l2a)
+    if !isempty(indices_s2)
+        indexdim_s2 = DD.Dim{:band_s2}(indices_s2)
 
-    fp_s1 = @showprogress desc = "S1 fingerprint.." map(indices_s1) do band
-        arceme_uncorrected_fp(band, ds, timeaxis=:time_sentinel_1_rtc, strata=strata)
+        fp_s2 = map(indices_s2) do band
+            arceme_bias_corrected_fp(band, ds, strata=strata)
+        end
+        fingerprint_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
+        fingerprint_uncor_sparse_s2 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp_uncorrected, fp_s2), indexdim_s2), (; band_s2=length(indices_s2)))
+        #fingerprints_s2 = time_aggregate_fingerprint(fingerprint_sparse_s2, eventdate, indexdim_s2, :time_sentinel_2_l2a)
+        s2cubes = (:s2_indices => fingerprint_sparse_s2, :uncorrected_s2_indices => fingerprint_uncor_sparse_s2, :class_fractions => fp_s2[1].class_fractions)
     end
-    fingerprint_sparse_s1 = setchunks(YAXArrays.concatenatecubes(map(i -> i.fp, fp_s1), indexdim_s1), (; band_s1=length(indices_s1)))
-
-    Dataset(; s2_indices=fingerprint_sparse_s2, s1_indices=fingerprint_sparse_s1, uncorrected_s2_indices=fingerprint_uncor_sparse_s2, class_fractions=fp_s1[1].class_fractions)
+    Dataset(; s1cubes..., s2cubes...)
 end
 
 function arceme_fractions(ds)
@@ -621,20 +664,47 @@ function arceme_fractions(ds)
     npix = length(ds.ESA_LC)
     #Find maximum landcover in both cubes
     classkeys, classnames = collect(keys(arceme_legends["ESA_LC"])), collect(values(arceme_legends["ESA_LC"]))
-    classax = DD.Dim{:lc}(classnames)
+    classax = DD.Dim{:class}(classnames)
     fracs = zeros(Float64, length(classax))
     for (k, v) in c
         iclass = findfirst(==(k), classkeys)
         fracs[iclass] = v / npix
     end
-    ds.cubes[:lc_fraction] = YAXArray((classax,), fracs)
-    ds.axes[:lc] = classax
+    ds.cubes[:class_fraction] = YAXArray((classax,), fracs)
+    ds.axes[:class] = classax
     sumcl = xmap(ds.cloud_mask ⊘ (:x, :y), ds.SCL ⊘ (:x, :y), inplace=false, output=XOutput(outtype=Float64)) do cl, scl
         sum(i -> ARCEMEAnalysis._is_cloud(i...), zip(cl, scl))
     end
     cloudfrac = sumcl[1, 1, :].data ./ length(ds.x) ./ length(ds.y)
     ds.cubes[:cloud_fraction] = YAXArray((ds.time_sentinel_2_l2a,), cloudfrac)
     ds
+end
+
+"""
+Compute a cloud mask with a 5x5 window halo
+"""
+function arceme_cloudmask_halo(d)
+    combined_clouds = xmap(d.cloud_mask, d.SCL, inplace=false, output=XOutput(outtype=UInt8)) do cl, scl
+        ARCEMEAnalysis._is_clear_or_shadow(cl, scl) + 2 * (cl==3)
+    end
+    inwindows = (DAE.InputArray(combined_clouds.data, windows=(DAE.MovingWindow(-1, 1, 5, 1000, (1, 1000)), DAE.MovingWindow(-1, 1, 5, 1000, (1, 1000)), 1:size(combined_clouds, 3))),)
+    outspec = (DAE.create_outwindows((1000, 1000, size(combined_clouds, 3)), chunks=(500, 500, 25)),)
+    halofunc(x) = any(==(0), x) ? 0 : all(==(1), x) ? 1 : 2
+    op = DAE.GMDWop(inwindows, outspec, DAE.create_userfunction(halofunc, UInt8, is_mutating=false))
+    d.cubes[:cloudmask_halo] = YAXArray(d.cloud_mask.axes, DAE.results_as_diskarrays(op)[1], Dict("legend"=>"0 => Clouds or missing, 1=>clear sky, 2=> clear sky or shadow"))
+end
+
+function arceme_precompute_fingerprints(tmpdir="./fingerprints"; batch="ARCEME-DC-DHP-GLOBAL")
+    @showprogress pmap(Iterators.product(1:2, arceme_validpairs(; batch))) do (iev, ev_p)
+        ev = ev_p[iev]
+        ds = arceme_open(ev; batch)
+        fp = ARCEMEAnalysis.arceme_index_fingerprints(ds)
+        savedataset(fp, path=joinpath(tmpdir, arceme_cubename(ev)), overwrite=true)
+    end
+
+    outputzipfile = joinpath(ARCEMEAnalysis.local_cubepath, "$batch-fingerprints.zip")
+    isfile(outputzipfile) && rm(outputzipfile)
+    ARCEMEAnalysis.zip_dir(outputzipfile, tmpdir)
 end
 
 using Reexport: @reexport
