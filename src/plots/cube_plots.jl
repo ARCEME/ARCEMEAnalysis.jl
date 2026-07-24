@@ -132,6 +132,7 @@ rep(A) = replace(
     0 => missing,
     65526 => missing,
     65527 => missing,
+    65530 => missing,
     65531 => missing,
     65532 => missing,
     65533 => missing,
@@ -301,8 +302,7 @@ function getsplines(current_event; bands = ["kNDVI", "NDVI"], batch = "ARCEME-DC
     outax = YAXArrays.time(range(firstday, lastday, step = Day(1)))
     s2 = YAXArray(
         (ds.x, ds.y, ds.time_sentinel_2_l2a, Dim{:band_s2}(bands)),
-        # !!cat(([ds[bands[i]].data] for i in eachindex(bands)), dims = 4),
-        cat(ds.kNDVI.data, ds.NDVI.data, dims = 4),
+        cat(tuple([ds[bands[i]].data for i in eachindex(bands)]...)..., dims = 4),
     )
     r_s2 = xmap(
         ARCEMEAnalysis.FingerprintPlots.filter_spline,
@@ -429,6 +429,7 @@ function crop_splines(
 end
 
 function tsstatsA(xout, ts, mce, mch, tempo)
+    # TO DO interpolate daily to have comparable values.
     if (ismissing(mce) || ismissing(mch))
         xout .= missing
         return nothing
@@ -454,6 +455,28 @@ function tsstatsA(xout, ts, mce, mch, tempo)
     xout .= cat(mx, tmx, sts, dims = 1)
     return nothing
 end
+
+get_mce(ds) = map(ds.CPMCE) do x
+    (x == 0 || x >= 65500) && return missing
+    return CubePlots.yydoy2date(x)
+end
+
+get_mch(ds) = map(ds.CPMCH) do x
+    (x == 0 || x >= 65500) && return missing
+    return CubePlots.yydoy2date(x)
+end
+
+get_sce(ds) = map(ds.CPSCE) do x
+    (x == 0 || x >= 65500) && return missing
+    return CubePlots.yydoy2date(x)
+end
+
+get_val(ds; layer) = map(ds[layer]) do x
+    (x == 0 || x >= 65500) && return missing
+    return x
+end
+
+
 
 """
     
@@ -484,15 +507,9 @@ function arceme_acrop(
         x >= 60 && return 3
     end
 
-    mce = map(ds.CPMCE) do x
-        (x == 0 || x >= 65500) && return missing
-        return CubePlots.yydoy2date(x)
-    end
+    mce = get_mce(ds)
 
-    mch = map(ds.CPMCH) do x
-        (x == 0 || x >= 65500) && return missing
-        return CubePlots.yydoy2date(x)
-    end
+    mch = get_mch(ds)
 
     outax = Dim{:mcstats}(["mx", "tmx", "sum"])
     mcstata = xmap(
@@ -706,18 +723,21 @@ function interpolate_ts(tmp, tempo; eachday = false, filter = false, windowsize 
         deleteat!(missmask, indflag .+ 1)
     end
     # linear interpolation 
-    tmp1 = fill(NaN, length(tmp))
-    tmp1[missmask] .= tmp[missmask]
     nodes = (dayssincestart[missmask],)
     itp = interpolate(nodes, tmp[missmask], Gridded(Interpolations.Linear()))
-    if missmask[1] > 1
-        tmp1[1:(missmask[1]-1)] .= tmp[missmask[1]]
-    end
-    if missmask[end] < length(dayssincestart)
-        tmp1[(missmask[end]+1):end] .= tmp[missmask[end]]
-    end
-    tmp1[missmask[1]:missmask[end]] = itp(dayssincestart[missmask[1]:missmask[end]])
+    etp = extrapolate(itp, Flat())
+    tmp1 = etp(dayssincestart)
     return (missmask, tmp1)
+end
+
+function filter_lininterp(yout, yin, xin, nout)
+    missmask = findall(x -> !ismissing(x) && isfinite(x), yin)
+    isempty(missmask) && return yout .= missing
+    xgood = xin[missmask]
+    ygood = yin[missmask]
+    itp = interpolate((xgood,), ygood, Gridded(Interpolations.Linear()))
+    etp = extrapolate(itp, Flat())
+    yout .= etp(range(0, nout-1))
 end
 
 """
