@@ -60,7 +60,7 @@ Search for all datasets available on WEkEO in whose name `filteron` occurs. Very
 
 Returns a `Vector` of `String`s
 """
-function hda_datasets(; filteron = "HRL")
+function hda_datasets(; filteron="HRL")
     hda_client = hrl_hda()
     datasets = hda_client.datasets()
     dataset_ids = [item["dataset_id"] for item in datasets]
@@ -115,8 +115,8 @@ function hrl_download(
     dataset_id::String,
     coord::Tuple,
     yr::Union{String,Int};
-    extent = 0.05,
-    product::Union{Nothing,String} = nothing,
+    extent=0.05,
+    product::Union{Nothing,String}=nothing,
 )
     hda_client = hrl_hda()
     json = pyimport("json")
@@ -169,7 +169,7 @@ function hrl_download(
     ]
     @showprogress desc = "Downloading..." for i in pylist(findall(todownload) .- 1)
         #   println("Downloading $(matches.results[i]["id"])")
-        matches[i].download(download_dir = hrl_localpath)
+        matches[i].download(download_dir=hrl_localpath)
     end
     return fnames
 end
@@ -455,11 +455,11 @@ const hrl_legends = Dict(
 reprojects and clips files in `fnames` to match `event`'s coordinate reference system and extent,
  and saves them as a Zarr group in `batch-HRL` under `ARCEMEAnalysis.local_cubepath`.
 """
-function hrl_warp(cubename, fnames::Vector; batch = "ARCEME-DC-6", suffix = "", zip = true)
+function hrl_warp(cubename, fnames::Vector; batch="ARCEME-DC-6", suffix="", zip=true)
     ds = arceme_open(cubename; batch)
     event_date = arceme_eventdate(ds)
     res = ds.properties["resolution"]
-    tmp = tempname(; suffix = ".tif")
+    tmp = tempname(; suffix=".tif")
 
     for hrl in keys(hrl_dict)
         hrl_fnames = fnames[map(contains("$(hrl)_"), fnames)]
@@ -499,8 +499,8 @@ function hrl_warp(cubename, fnames::Vector; batch = "ARCEME-DC-6", suffix = "", 
         tds = setchunks(tds, (500, 500))
         savedataset(
             tds,
-            path = joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename),
-            append = true,
+            path=joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename),
+            append=true,
         )
     end
     # zip ?
@@ -515,7 +515,7 @@ function hrl_warp(cubename, fnames::Vector; batch = "ARCEME-DC-6", suffix = "", 
         joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$cubename.zip"),
         joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename),
     )
-    rm(joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename), recursive = true)
+    rm(joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename), recursive=true)
     return joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$cubename.zip")
 end
 
@@ -524,13 +524,13 @@ hrl_warp(event::ARCEMEAnalysis.Event; kwargs...) =
 
 function hrl_warp(
     cubename::String;
-    batch = "ARCEME-DC-6",
-    dataset_id::Union{String,Vector{String}} = [
+    batch="ARCEME-DC-6",
+    dataset_id::Union{String,Vector{String}}=[
         "EO:EEA:DAT:HRL:CRL",
         "EO:EEA:DAT:HRL:TCF",
         "EO:EEA:DAT:HRL:GRA",
     ],
-    yr = nothing,
+    yr=nothing,
     kwargs...,
 )
     ds = arceme_open(cubename; batch)
@@ -549,7 +549,7 @@ end
 Get the  statistics of layer `name` for the ARCEME data cube `ds`.
 Default classes are extracted from `hrl_legends[name]`. Alternative classes can be provided as a dictionary.
 """
-function arceme_stats(ds, name; classes = nothing)
+function arceme_stats(ds, name; classes=nothing)
     if isnothing(classes)
         classes = hrl_legends[name]
     end
@@ -557,15 +557,15 @@ function arceme_stats(ds, name; classes = nothing)
     map(collect(classes)) do (k, v)
         count = get(cdr, k, 0)
         (
-            key = k,
-            class = v,
-            count = count,
-            fraction = count / (length(ds.x) * length(ds.y)),
+            key=k,
+            class=v,
+            count=count,
+            fraction=count / (length(ds.x) * length(ds.y)),
         )
     end
 end
-arceme_stats(ev::ARCEMEAnalysis.Event, name; batch = "ARCEME-DC-8", classes = nothing) =
-    arceme_stats(arceme_open(ev, batch = batch), name; classes = classes)
+arceme_stats(ev::ARCEMEAnalysis.Event, name; batch="ARCEME-DC-8", classes=nothing) =
+    arceme_stats(arceme_open(ev, batch=batch), name; classes=classes)
 
 function ctykeymap(k)
     k == 0 && return 1
@@ -593,6 +593,49 @@ function mctykeymap(k)
     ctL1 == 2 && return 3 # permanent crop
     k == 3100 && return 2 # Unclassified annual crop
     k == 3200 && return 3 # Unclassified permanent crop
+end
+
+
+function get_soilcover(event_date, ds)
+    amce = ARCEMEAnalysis.CubePlots.get_mce(ds)
+    amch = ARCEMEAnalysis.CubePlots.get_mch(ds)
+    asce = ARCEMEAnalysis.CubePlots.get_sce(ds)
+    ascd = ARCEMEAnalysis.CubePlots.get_val(ds, layer="CPSCD")
+    absb = ARCEMEAnalysis.CubePlots.get_val(ds, layer="CPBSB")
+    absa = ARCEMEAnalysis.CubePlots.get_val(ds, layer="CPBSA")
+    soilcover = broadcast(amce, amch, asce, ds.CPSCT, ascd, absb, absa) do mce, mch, sce, sct, scd, bsb, bsa
+        (ismissing(mce) || ismissing(mch)) && return UInt8(255)
+        if event_date >= mce
+            if event_date <= mch
+                return UInt(1)
+            else
+                ismissing(bsa) && return missing
+                if event_date < mch + Day(bsa)
+                    return UInt8(0)
+                else
+                    ismissing(scd) && return missing
+                    if sct in (1, 2) && event_date > (sce + Day(scd)) # summer secondary crop
+                        return UInt8(0)
+                    else
+                        return UInt8(1)
+                    end
+                end
+            end
+        else # event_date < mce
+            ismissing(bsb) && return missing
+            if event_date >= (mce-Day(bsb))
+                return UInt8(0)
+            else
+                ismissing(scd) && return missing
+                if sct in (3, 4) && event_date < sce  # winter secondary crop
+                    return UInt8(0)
+                else
+                    return UInt8(1)
+                end
+            end
+        end
+    end
+    return soilcover
 end
 export hrl_download,
     hrl_set_localpath, hda_datasets, hda_products, hda_years, hrl_warp, arceme_stats
