@@ -41,6 +41,7 @@ function hrl_hda()
     hda = try
         pyimport("hda") #("Client", "Configuration")
     catch
+        CondaPkg.add("numpy")
         CondaPkg.add("hda")
         pyimport("hda")
     end
@@ -60,7 +61,7 @@ Search for all datasets available on WEkEO in whose name `filteron` occurs. Very
 
 Returns a `Vector` of `String`s
 """
-function hda_datasets(; filteron="HRL")
+function hda_datasets(; filteron="EO:CLMS:DAT")
     hda_client = hrl_hda()
     datasets = hda_client.datasets()
     dataset_ids = [item["dataset_id"] for item in datasets]
