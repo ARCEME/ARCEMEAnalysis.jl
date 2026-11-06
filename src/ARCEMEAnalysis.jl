@@ -718,4 +718,8 @@ include("hrl_helpers.jl")
 @reexport using .HRL
 
 include("plots/fingerprint_plots.jl")
+
+include("recovery.jl")
+
+@reexport using .RecoveryAnalysis
 end #module
