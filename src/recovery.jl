@@ -8,38 +8,6 @@
 # do not pollute the `ARCEMEAnalysis` namespace. Public entry points are the
 # `arceme_`-prefixed functions listed in the export statement; everything else
 # is private to the submodule.
-#
-# Loop order (revised): LAND COVER is the outermost loop, but the per-pair
-# spline computation is hoisted out of it and cached once per pair
-# (arceme_recovery_cache / PairSplines). For each LC in a configurable set,
-# select that LC from each cube and discard the site (pair) if the LC is not
-# present. The selected per-site slices are uniform [time_smooth × band], so
-# qualifying sites are concatenated along a new :pair_index axis and reduced
-# over sites. Within an LC, sites are stratified by vegetation state at the
-# event (growing season vs dormant) before averaging.
-#
-# Data stay in the YAXArrays realm and keep `missing` (no NaN conversion):
-# process_pair_splines (compute_indexsplines -> expand_s2bands -> _squeeze_s1)
-# -> label_pair (select_lc -> vegstate_group) -> average_smoothed_index_for_lc.
-#
-# Step A1 (PairSplines / process_pair_splines), Step A2 (label_pair /
-# PairResult), Step B (stack_group / reduce_group / aggregate_group, the
-# paired :pair_index stacking + Mean/Std/SE/N reduction of both d and dhp
-# curves), Step C (recovery_pvalues / fdr_bh / test_recovery_d_dhp, per-day
-# paired Wilcoxon + BH FDR) and Step D (recovery_panel! /
-# arceme_recovery_plot_delta / arceme_recovery_export_csv /
-# arceme_recovery_plot, Makie delta figures + long/tidy CSV) implemented. The
-# year-after-minus-year-before analysis reuses the whole pipeline via
-# year_diff / aggregate_group(; transform=year_diff); recovery_pvalues derives
-# the recovery window from the time_smooth axis so it works for both the full
-# -365:365 and the year_diff 0:365 axes. S1 stacking/reduction is deferred.
-#
-# See RECOVERY_PLAN.md (workspace root) for the full design.
-#
-# Migration note: this file was extracted from the root script
-# `recovery_analysis.jl`. Plotting uses `Makie` directly (already a package
-# dependency); callers load a backend (e.g. `CairoMakie` or `GLMakie`) before
-# calling the plotting functions.
 
 module RecoveryAnalysis
 
@@ -79,7 +47,7 @@ const REL_TIME_AXIS = DD.Dim{:time_smooth}(-365:365)
 # reported; below this the cell is left `missing`.
 const MIN_SAMPLES = 3
 
-# FDR significance level for the per-day paired tests (Step C).
+# FDR significance level for the per-day paired tests
 const FDR_ALPHA = 0.05
 
 const S2_BANDS = ("NDVI", "kNDVI", "NDWI", "EVI2", "NIRv", "NDMI", "NSDSI3", "WDRVI")
@@ -135,8 +103,9 @@ RECOVERY_PLAN.md decision 1: agree -> accept; disagree but a cube is within
 """
 struct GrowingSeasonSplitter <: VegStateGrouper
     tol::Float64
+    threshold::Float64
 end
-GrowingSeasonSplitter(; tol = 0.05) = GrowingSeasonSplitter(tol)
+GrowingSeasonSplitter(; tol=0.05, threshold=1/3) = GrowingSeasonSplitter(tol, threshold)
 
 vegstate_groups(::GrowingSeasonSplitter) = (:growing_season, :dormant)
 function group_token(::GrowingSeasonSplitter, group::Symbol)
@@ -145,20 +114,8 @@ function group_token(::GrowingSeasonSplitter, group::Symbol)
     throw(ArgumentError("no output-directory token for veg-state group $group"))
 end
 
-# ---------------------------------------------------------------------------
-# Output layout tokens (grouper, veg-state group, sensor)
-# ---------------------------------------------------------------------------
-#
-# Step D writes figures under `recovery_plots/` and tidy CSV under
-# `recovery_data/`, each with a 3-level nested structure: the grouper's
-# concrete-type name (`GrowingSeasonSplitter`) -> the veg-state group directory
-# (`growing` / `dormant`) -> the files, whose names encode the land-cover class
-# and sensor, e.g. `Tree_cover-s2-recovery_curves.csv`. These helpers map the
-# analysis objects to those directory / filename tokens so the layout generalizes
-# to future groupers and the (deferred) Sentinel-1 `-s1` siblings.
+Base.string(g::GrowingSeasonSplitter) = "GrowingSeasonSplitter_$(g.threshold)"
 
-# Human-readable name of a veg-state grouper: its concrete type name, used as
-# the level-1 output-directory token (e.g. "GrowingSeasonSplitter").
 function Base.string(g::VegStateGrouper)
     string(nameof(typeof(g)))
 end
@@ -183,10 +140,10 @@ end
 # Event-point value, or `nothing` when missing.
 _eventval(curve, i_ev) = ismissing(curve[i_ev]) ? nothing : curve[i_ev]
 
-function _reconcile_growing(kd, kh, i_ev; tol)
+function _reconcile_growing(kd, kh, i_ev; tol, threshold)
     qd, qh = _gq95(kd), _gq95(kh)
     (isnan(qd) || isnan(qh)) && return :skip   # a cube has no valid data for this class
-    vd, vh = qd / 3, qh / 3
+    vd, vh = qd * threshold, qh * threshold
     ed, eh = _eventval(kd, i_ev), _eventval(kh, i_ev)
     (ed === nothing || eh === nothing) && return :skip
     gd = ed > vd
@@ -208,7 +165,7 @@ end
 # has no valid values for that LC (see _reconcile_growing).
 function vegstate_group(g::GrowingSeasonSplitter, curve_d, curve_h, i_ev)
     (isempty(_valid_vals(curve_d)) || isempty(_valid_vals(curve_h))) && return :skip
-    _reconcile_growing(curve_d, curve_h, i_ev; tol = g.tol)
+    _reconcile_growing(curve_d, curve_h, i_ev; tol=g.tol, threshold=g.threshold)
 end
 
 # ---------------------------------------------------------------------------

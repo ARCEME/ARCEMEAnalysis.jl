@@ -29,7 +29,12 @@ function filter_spline(xout, samplets, x, nout)
         return xout .= NaN
     end
 
-    xout .= evaluate(spl, range(0, 2, length=nout))
+    splineeval = evaluate(spl, range(0, 2, length=nout))
+    ymin, ymax = extrema(ygood)
+    datarange = ymax - ymin
+    lowclip = ymin - 0.025*datarange
+    highclip = ymax + 0.025*datarange
+    xout .= clamp.(splineeval, lowclip, highclip)
 end
 
 
