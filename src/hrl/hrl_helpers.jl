@@ -29,6 +29,175 @@ if !isdir(hrl_localpath)
     mkdir(hrl_localpath)
 end
 
+"""
+Mapping from old WEkEO HRL dataset/product identifiers to new CLMS dataset IDs.
+
+Key values are `Vector{String}` — either a single-element vector for a direct product
+mapping, or a multi-element vector for old parent datasets (CRL, TCF, GRA) that
+returned all their products.
+
+Old parent datasets resolved to vectors of all their products:
+- `EO:EEA:DAT:HRL:CRL` → all cropland CLMS datasets (22 products, see hrl_dict lines
+  before `#Forest`)
+- `EO:EEA:DAT:HRL:TCF` → tree cover & forest CLMS datasets (TCD, TCDCL, DLT, DLTCL)
+- `EO:EEA:DAT:HRL:GRA` → grassland CLMS datasets (GRA, GRACL, HER, PLOUGH, GRAME,
+  GRAMECL, GRAMD1-4)
+
+Confidence layers without corresponding CLMS datasets map to `String[]` (empty).
+"""
+const hrl_dataset_map = Dict{String,Vector{String}}(
+    # --- Cropland parent (EO:EEA:DAT:HRL:CRL) ---
+    # Returns ALL cropland products for backward compatibility
+    "EO:EEA:DAT:HRL:CRL" => [
+        "EO:CLMS:DAT:CTY_10M_YEARLY_2017_PRESENT",          # CTY
+        "",                                                   # CTYCL → no CLMS dataset (confidence)
+        "EO:CLMS:DAT:CPMCH_10M_YEARLY_2017_PRESENT",        # CPMCH
+        "",                                                   # CPMCHCL → no CLMS dataset
+        "EO:CLMS:DAT:CPMCE_10M_YEARLY_2017_PRESENT",        # CPMCE
+        "",                                                   # CPMCECL → no CLMS dataset
+        "EO:CLMS:DAT:CPMCD_10M_YEARLY_2017_PRESENT",        # CPMCD
+        "",                                                   # CPMCDCL → no CLMS dataset
+        "EO:CLMS:DAT:CPBSB_10M_YEARLY_2017_PRESENT",        # CPBSB
+        "",                                                   # CPBSBCL → no CLMS dataset
+        "EO:CLMS:DAT:CPBSA_10M_YEARLY_2017_PRESENT",        # CPBSA
+        "",                                                   # CPBSACL → no CLMS dataset
+        "EO:CLMS:DAT:CPSCT_10M_YEARLY_2017_PRESENT",        # CPSCT
+        "EO:CLMS:DAT:CPSCE_10M_YEARLY_2017_PRESENT",        # CPSCE
+        "EO:CLMS:DAT:CPSCD_10M_YEARLY_2017_PRESENT",        # CPSCD
+        "",                                                   # CPSCDCL → no CLMS dataset
+        "EO:CLMS:DAT:CPFLP_10M_YEARLY_2017_PRESENT",        # CPFLP
+        "",                                                   # CPFLPCL → no CLMS dataset
+        # CPFLD is commented out in hrl_dict — skip
+        # "EO:CLMS:DAT:CPFLD_10M_YEARLY_2017_PRESENT",
+        "",                                                   # CPFLDCL → no CLMS dataset
+        "EO:CLMS:DAT:CPCSY_10M_YEARLY_2017_PRESENT",        # CPCSY
+        "EO:CLMS:DAT:CPCST_10M_YEARLY_2017_PRESENT",        # CPCST
+    ],
+    # --- Tree cover / Forest parent (EO:EEA:DAT:HRL:TCF) ---
+    "EO:EEA:DAT:HRL:TCF" => [
+        "EO:CLMS:DAT:TCD_10M_YEARLY_2018_PRESENT",          # TCD
+        "",                                                   # TCDCL → no CLMS dataset
+        "EO:CLMS:DAT:DLT_10M_YEARLY_2018_PRESENT",          # DLT
+        "",                                                   # DLTCL → no CLMS dataset
+    ],
+    # --- Grassland parent (EO:EEA:DAT:HRL:GRA) ---
+    "EO:EEA:DAT:HRL:GRA" => [
+        "EO:CLMS:DAT:GRA_10M_YEARLY_2017_PRESENT",          # GRA
+        "",                                                   # GRACL → no CLMS dataset
+        "EO:CLMS:DAT:HER_10M_YEARLY_2017_PRESENT",          # HER
+        "EO:CLMS:DAT:PLOUGH_10M_YEARLY_2017_PRESENT",       # PLOUGH
+        "EO:CLMS:DAT:GRAME_10M_YEARLY_2017_PRESENT",        # GRAME
+        "",                                                   # GRAMECL → no CLMS dataset
+        "EO:CLMS:DAT:GRAMD_10M_YEARLY_2017_PRESENT_4_EVENTS", # GRAMD1-4 (single dataset)
+    ],
+    # --- Confidence layers (no CLMS dataset — return empty) ---
+    "CTYCL" => String[],
+    "CPMCHCL" => String[],
+    "CPMCECL" => String[],
+    "CPMCDCL" => String[],
+    "CPBSBCL" => String[],
+    "CPBSACL" => String[],
+    "CPSCDCL" => String[],
+    "CPFLPCL" => String[],
+    "CPFLDCL" => String[],
+    "TCDCL" => String[],
+    "DLTCL" => String[],
+    "GRACL" => String[],
+    "GRAMECL" => String[],
+)
+
+"""
+    resolve_hrl_dataset_id(id::String)
+
+Resolve a dataset identifier to the corresponding new CLMS dataset IDs.
+
+Returns a `Vector{String}` of new dataset IDs:
+- Old parent dataset IDs (e.g. "EO:EEA:DAT:HRL:CRL") → all associated CLMS datasets
+- Old product references (e.g. "CTY", "CPMCH") → single-element vector
+- New CLMS dataset IDs → single-element vector (passthrough)
+- Confidence layer codes with no CLMS equivalent → empty vector
+
+To get confidence layers, query the corresponding base dataset with the
+`datasetIdentifier` query parameter.
+"""
+function resolve_hrl_dataset_id(id::String)::Vector{String}
+    # Direct lookup in hrl_dataset_map (old parent IDs and explicit product codes)
+    if haskey(hrl_dataset_map, id)
+        return hrl_dataset_map[id]
+    end
+    # Already a new-style CLMS ID
+    startswith(id, "EO:CLMS:DAT:") && return [id]
+    # Special case: DLT and TCD use 2018, everything else uses 2017
+    if id in ("DLT", "TCD")
+        return ["EO:CLMS:DAT:$(id)_10M_YEARLY_2018_PRESENT"]
+    end
+    # Try to match a key from hrl_dict (new-style product code)
+    if haskey(hrl_dict, id)
+        return ["EO:CLMS:DAT:$(id)_10M_YEARLY_2017_PRESENT"]
+    end
+    # Try case-insensitive match on hrl_dict keys
+    for k in keys(hrl_dict)
+        if lowercase(k) == lowercase(id)
+            if k in ("DLT", "TCD")
+                return ["EO:CLMS:DAT:$(k)_10M_YEARLY_2018_PRESENT"]
+            end
+            return ["EO:CLMS:DAT:$(k)_10M_YEARLY_2017_PRESENT"]
+        end
+    end
+    error("Cannot resolve HRL dataset id: '$id'. Must be an old HRL ID (e.g. \"EO:EEA:DAT:HRL:CRL\"), a new CLMS ID (e.g. \"EO:CLMS:DAT:CTY_10M_YEARLY_2017_PRESENT\"), or a product code from HRL.hrl_dict (e.g. \"CTY\", \"CPCSY\", \"CPMCH\").")
+end
+
+# Internal helper: download from a vector of already-resolved CLMS dataset IDs
+# (skips the resolve step to avoid double-resolution)
+function _hrl_download_resolved(
+    resolved_ids::Vector{String},
+    coord::Tuple,
+    yr::Union{String,Int};
+    extent=0.05,
+    kwargs...,
+)::Vector{String}
+
+    hda_client = hrl_hda()
+    json = pyimport("json")
+    (lon, lat) = coord
+    fnames = Vector{String}()
+
+    for ds_id in resolved_ids
+        isempty(ds_id) && continue  # skip confidence layers
+
+        query = """
+        {
+          "dataset_id": "$(ds_id)",
+          "bbox": [
+            $(lon-extent),
+            $(lat-extent),
+            $(lon+extent),
+            $(lat+extent)
+          ],
+          "startdate": "$(DateTime(yr)).000Z",
+          "enddate": "$(DateTime(yr) + Day(1)).000Z",
+          "itemsPerPage": 200,
+          "startIndex": 0
+        }
+        """
+        matches = hda_client.search(json.loads(query))
+        try
+            for idx in pylist(0:(length(matches)-1))
+                item = matches.results[idx]
+                filename = pyconvert(String, item["id"]) * ".zip"
+                zip_path = joinpath(hrl_localpath, filename)
+                if !isfile(zip_path)
+                    matches[idx].download(download_dir=hrl_localpath)
+                end
+                push!(fnames, filename)
+            end
+        catch
+            @warn "No matches found for $(ds_id) at $(coord) in year $(yr)"
+        end
+    end
+    return fnames
+end
+
 
 """
 `hrl_hda()`
@@ -73,41 +242,94 @@ end
 `hda_products(dataset_id)`
 
 Lists all valid productType for `dataset_id` on WEkEO.
-Returns a vector of strings
+Returns a vector of strings.
+
+For new CLMS datasets (EO:CLMS:DAT:*) each dataset has a single product,
+so this returns ["default"]. For old HRL datasets the full list is returned.
 """
 function hda_products(dataset_id)
     hda_client = hrl_hda()
     metadata = hda_client.metadata(dataset_id)
+    props = metadata["properties"]["productType"]
+    if !haskey(props, "oneOf")
+        # New CLMS datasets have a single product (no oneOf enum)
+        return ["default"]
+    end
     map(
         x -> x["const"],
-        pyconvert(Vector{Dict}, metadata["properties"]["productType"]["oneOf"]),
+        pyconvert(Vector{Dict}, props["oneOf"]),
     )
 end
+
+"""
+`hrl_info(dataset_id)`
+
+Returns full metadata for a dataset (resolves old HRL IDs to new CLMS IDs first).
+When the old ID maps to multiple CLMS datasets, returns metadata for the primary one.
+Returns a Dict of the dataset metadata.
+"""
+function hrl_info(dataset_id)
+    resolved = resolve_hrl_dataset_id(dataset_id)
+    ds_id = first(resolved)
+    hda_client = hrl_hda()
+    metadata = hda_client.dataset(ds_id)
+    pyconvert(Dict, metadata)
+end
+
+# datasetIdentifier (legacy alias)
+const hda_info = hrl_info
+
 
 """
 `hda_years(dataset_id)`
 
 Lists all valid years or epochs for `dataset_id` on WEkEO.
-Returns a vector of strings
+Returns a vector of strings.
+
+For new CLMS datasets (EO:CLMS:DAT:*) the year range is encoded in the
+dataset ID itself (e.g. "CTY_10M_YEARLY_2017_PRESENT"), so this returns
+["2017_PRESENT"] (extracted from the dataset ID). For old HRL datasets
+the full list from the API is returned.
 """
 function hda_years(dataset_id)
     hda_client = hrl_hda()
     metadata = hda_client.metadata(dataset_id)
-    map(x -> x["const"], pyconvert(Vector{Dict}, metadata["properties"]["year"]["oneOf"]))
+    props = metadata["properties"]["year"]
+    if !haskey(props, "oneOf")
+        # New CLMS datasets: extract year range from dataset ID
+        if occursin("2017_PRESENT", dataset_id)
+            return ["2017_PRESENT"]
+        elseif occursin("2018_PRESENT", dataset_id)
+            return ["2018_PRESENT"]
+        elseif occursin("2019_PRESENT", dataset_id)
+            return ["2019_PRESENT"]
+        elseif occursin("2020_PRESENT", dataset_id)
+            return ["2020_PRESENT"]
+        end
+        return ["PRESENT"]
+    end
+    map(x -> x["const"], pyconvert(Vector{Dict}, props["oneOf"]))
 end
 
 
 """
-`hrl_download(dataset_id::String, coordinates::Tuple, yr::Union{String,Int}; extent=0.05, product::{Union{Nothing,String}}=nothing)`
-`hrl_download(dataset_id::Vector{String}, coordinates::Tuple, yr::Union{String,Int}; extent=0.05, product::{Union{Nothing,String}}=nothing)`
+`hrl_download(dataset_id::String, coordinates::Tuple, yr::Union{String,Int}; extent=0.05, product::Union{Nothing,String}=nothing)`
+`hrl_download(dataset_id::Vector{String}, coordinates::Tuple, yr::Union{String,Int}; extent=0.05, product::Union{Nothing,String}=nothing)`
 
-Downloads Copernicus Land Monitoring Service High Resolution Layer products from WEkEO using the Harmonised Data Access API. 
-  `dataset_id` must be a single valid dataset (e.g., Cropland: "EO:EEA:DAT:HRL:CRL"; Tree cover and Forest: "EO:EEA:DAT:HRL:TCF"; 
-  Grassland: "EO:EEA:DAT:HRL:GRA") or a vector of vallid datasets.
-  Search for all tiles near `coordinates` with (lon, lat) +- `extent`, for year `yr`. Some products are only available for three-years epochs.
-  Data are downloaded at `hrl_localpath` only if they do not already exist.
-  By default, all products from `dataset_id` are returned. To search for a specific product, set `product` to a valid productType (e.g. "Crop Types")
-  
+Downloads Copernicus Land Monitoring Service High Resolution Layer products from WEkEO using the Harmonised Data Access API.
+
+`dataset_id` can be:
+- Old HRL dataset IDs (e.g. "EO:EEA:DAT:HRL:CRL") — resolved to ALL associated CLMS datasets
+- New CLMS dataset IDs (e.g. "EO:CLMS:DAT:CTY_10M_YEARLY_2017_PRESENT")
+- Product codes from `hrl_dict` (e.g. "CTY", "CPCSY", "CPSCT")
+
+Searches for all tiles near `coordinates` with (lon, lat) +- `extent`, for year `yr`.
+Data are downloaded at `hrl_localpath` only if they do not already exist.
+
+When requesting an old parent dataset (CRL, TCF, GRA), all corresponding CLMS
+datasets are queried. Confidence layers (CTYCL, TCDCL, etc.) have no dedicated
+CLMS dataset — use the base dataset instead.
+
 Returns a Vector of filenames.
 
 See also `hda_datasets`, `hda_products`, `hda_years`
@@ -116,63 +338,11 @@ function hrl_download(
     dataset_id::String,
     coord::Tuple,
     yr::Union{String,Int};
-    extent=0.05,
-    product::Union{Nothing,String}=nothing,
+    kwargs...,
 )
-    hda_client = hrl_hda()
-    json = pyimport("json")
-
-    (lon, lat) = coord
-    fnames = []
-
-    # Build query as a JSON object
-    if !isnothing(product)
-        pt = """,
-        "productType": "$(product)"
-        """
-    else
-        pt = ""
-    end
-
-    query = """
-    {
-      "dataset_id": "$(dataset_id)",
-      "bbox": [
-        $(lon-extent),
-        $(lat-extent),
-        $(lon+extent),
-        $(lat+extent)
-      ],
-      "resolution": "10m",
-      "year": "$yr",
-      "itemsPerPage": 200,
-      "startIndex": 0$(pt)
-    }
-    """
-
-    matches = hda_client.search(json.loads(query))
-    try
-        for item in matches.results
-            # println(item["id"])
-            filename = pyconvert(String, item["id"]) * ".zip"
-            # store info:
-            push!(fnames, filename)
-        end
-    catch
-        @warn "No matches found for $(dataset_id) at $(coordinates) in year $(yr)"
-        return fnames
-    end
-
-    # Download
-    todownload = [
-        !isfile(joinpath(hrl_localpath, pyconvert(String, item["id"]) * ".zip")) for
-        item in matches.results
-    ]
-    @showprogress desc = "Downloading..." for i in pylist(findall(todownload) .- 1)
-        #   println("Downloading $(matches.results[i]["id"])")
-        matches[i].download(download_dir=hrl_localpath)
-    end
-    return fnames
+    resolved = resolve_hrl_dataset_id(dataset_id)
+    isempty(resolved) && return String[]
+    _hrl_download_resolved(resolved, coord, yr; kwargs...)
 end
 
 function hrl_download(
@@ -181,11 +351,11 @@ function hrl_download(
     yr::Union{String,Int};
     kwargs...,
 )
-    fnames = []
+    all_resolved = String[]
     for dataset_id in datasets
-        append!(fnames, HRL.hrl_download(dataset_id, coord, yr; kwargs...))
+        append!(all_resolved, resolve_hrl_dataset_id(dataset_id))
     end
-    return fnames
+    _hrl_download_resolved(all_resolved, coord, yr; kwargs...)
 end
 
 const hrl_dict = Dict(
@@ -449,12 +619,38 @@ const hrl_legends = Dict(
 )
 
 """
+Extract the year from an HRL downloaded filename.
+
+Handles both old format ("CTY_2023_tile09VFP.zip" → "2023")
+and new format ("CLMS_HRLVLCC_CTY_S2024_R10m_...zip" → "2024").
+"""
+function _hrl_year_from_fname(fname::String)::String
+    # Strip .zip if present
+    base = endswith(fname, ".zip") ? fname[1:(end-4)] : fname
+    parts = split(base, "_")
+    # New format: CLMS_HRLVLCC_CTY_S2024_R10m_...
+    # Index 4 is "S2024" — strip the S prefix
+    if length(parts) >= 4 && occursin(r"^S\d{4}$", parts[4])
+        return parts[4][2:end]
+    end
+    # Old format: CTY_2023_tile09VFP or similar
+    for p in parts
+        if occursin(r"^\d{4}$", p)
+            return p
+        end
+    end
+    return "unknown"
+end
+
+"""
 `hrl_warp(event::ARCEMEAnalysis.Event; batch="ARCEME-DC-6", dataset_id::Union{String, Vector{String}}=["EO:EEA:DAT:HRL:CRL", "EO:EEA:DAT:HRL:TCF", "EO:EEA:DAT:HRL:GRA"])`
 `hrl_warp(cubename, fnames::Vector{String}; batch="ARCEME-DC-6")`
 `hrl_warp(cubename::String; batch="ARCEME-DC-6", dataset_id::Union{String, Vector{String}}=["EO:EEA:DAT:HRL:CRL", "EO:EEA:DAT:HRL:TCF", "EO:EEA:DAT:HRL:GRA"])`
 
-reprojects and clips files in `fnames` to match `event`'s coordinate reference system and extent,
- and saves them as a Zarr group in `batch-HRL` under `ARCEMEAnalysis.local_cubepath`.
+Reprojects and clips files in `fnames` to match `event`'s coordinate reference system and extent,
+and saves them as a Zarr group in `batch-HRL` under `ARCEMEAnalysis.local_cubepath`.
+
+Old dataset IDs (e.g. "EO:EEA:DAT:HRL:CRL") are resolved automatically for backward compatibility.
 """
 function hrl_warp(cubename, fnames::Vector; batch="ARCEME-DC-6", suffix="", zip=true)
     ds = arceme_open(cubename; batch)
@@ -484,7 +680,7 @@ function hrl_warp(cubename, fnames::Vector; batch="ARCEME-DC-6", suffix="", zip=
         # write to zarr
         props = Dict(
             "long_name" => hrl_dict["$(split(hrl_fnames[1],"_")[3])"],
-            "year_coverage" => split(hrl_fnames[1], "_")[4][2:5], #year(event_date),
+            "year_coverage" => _hrl_year_from_fname(hrl_fnames[1]),
             "legend" => hrl_legends["$(split(hrl_fnames[1],"_")[3])"],
             "epsg" => ds.properties["epsg"],
             "resolution" => 10,
@@ -639,5 +835,5 @@ function get_soilcover(event_date, ds)
     return soilcover
 end
 export hrl_download,
-    hrl_set_localpath, hda_datasets, hda_products, hda_years, hrl_warp, arceme_stats
+    hrl_set_localpath, hda_datasets, hda_products, hda_years, hrl_warp, arceme_stats, hrl_info, resolve_hrl_dataset_id
 end #module
