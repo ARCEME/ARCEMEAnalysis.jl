@@ -658,24 +658,39 @@ function hrl_warp(cubename, fnames::Vector; batch="ARCEME-DC-6", suffix="", zip=
     res = ds.properties["resolution"]
     tmp = tempname(; suffix=".tif")
 
+    outputzarr = joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename)
+
     for hrl in keys(hrl_dict)
         hrl_fnames = fnames[map(contains("$(hrl)_"), fnames)]
         if isempty(hrl_fnames)
             continue
         end
-        run(
-            Cmd(
-                `gdalwarp 
-                    -t_srs $(AG.toPROJ4(AG.importEPSG(ds.properties["epsg"]))) 
-                    -tr $res $res
-                    -te $(minimum(ds.x)) $(minimum(ds.y)) $(maximum(ds.x)+res) $(maximum(ds.y)+res) 
-                    -r near
-                    $(["/vsizip/$(joinpath(hrl_localpath, hrl_fnames[i], "$(split(hrl_fnames[i],".")[1]).tif") )" for i in eachindex(hrl_fnames)]) 
-                    $tmp 
-                    -overwrite 
-                    `,
-            ),
-        )
+        # use gdal distribution shipped with (Arch)GDAL.jl rather than system One
+        try
+            run(
+                `$(AG.GDAL.gdalwarp_exe()) 
+                -t_srs $(AG.toPROJ4(AG.importEPSG(ds.properties["epsg"]))) 
+                -tr $res $res
+                -te $(minimum(ds.x)) $(minimum(ds.y)) $(maximum(ds.x)+res) $(maximum(ds.y)+res) 
+                -r near
+                $(["/vsizip/$(joinpath(hrl_localpath, hrl_fnames[i], "$(split(hrl_fnames[i],".")[1]).tif") )" for i in eachindex(hrl_fnames)]) 
+                $tmp 
+                -overwrite 
+                `
+            )
+        catch
+            run(
+                `$(AG.GDAL.gdalwarp_exe()) 
+                -t_srs $(AG.toPROJ4(AG.importEPSG(ds.properties["epsg"]))) 
+                -tr $res $res
+                -te $(minimum(ds.x)) $(minimum(ds.y)) $(maximum(ds.x)+res) $(maximum(ds.y)+res) 
+                -r near
+                $(["/vsizip/$(joinpath(hrl_localpath, hrl_fnames[i], "$(split(hrl_fnames[i],".")[1])","$(split(hrl_fnames[i],".")[1]).tif") )" for i in eachindex(hrl_fnames)]) 
+                $tmp 
+                -overwrite 
+                `
+            )
+        end
         c = Cube(tmp)
         # write to zarr
         props = Dict(
@@ -696,24 +711,17 @@ function hrl_warp(cubename, fnames::Vector; batch="ARCEME-DC-6", suffix="", zip=
         tds = setchunks(tds, (500, 500))
         savedataset(
             tds,
-            path=joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename),
+            path=outputzarr,
             append=true,
         )
     end
     # zip ?
-    !zip && return joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename)
-
-    isfile(
-        joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", string(cubename, ".zip")),
-    ) && rm(
-        joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", string(cubename, ".zip")),
-    )
-    ARCEMEAnalysis.zip_dir(
-        joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$cubename.zip"),
-        joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename),
-    )
-    rm(joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", cubename), recursive=true)
-    return joinpath(ARCEMEAnalysis.local_cubepath, "$(batch)-HRL", "$cubename.zip")
+    !zip && return outputzarr
+    outputzip = "$outputzarr.zip"
+    isfile(outputzip) && rm(outputzip)
+    ARCEMEAnalysis.zip_dir(outputzip, outputzarr)
+    rm(outputzarr, recursive=true)
+    return outputzip
 end
 
 hrl_warp(event::ARCEMEAnalysis.Event; kwargs...) =
